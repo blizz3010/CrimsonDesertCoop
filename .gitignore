@@ -1,0 +1,44 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Compiled
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.asi
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# Dependencies (fetched by CMake)
+_deps/
+
+# Config (may contain user-specific settings)
+cdcoop_config.json
+
+# Logs
+*.log
+
+# Steamworks SDK (must be downloaded separately)
+steamworks_sdk/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
