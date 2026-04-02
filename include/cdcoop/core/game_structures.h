@@ -102,8 +102,18 @@ namespace PartInOutSocket {
 // The player pointer is obtained from the PlayerPointerCapture hook,
 // where rax = actor pointer, rsi = status marker pointer.
 //
-// Position is accessed via the PositionHeightAccess hook where
-// r13 points to a float[3] array: [X, Y/height, Z].
+// Verified pointer chains (from position_research.md):
+//   Actor -> +0x40 -> +0x08 -> player_core
+//   position_owner -> +0x248 -> position_struct -> +0x90 (x,y,z,w float4)
+//   Status marker: [rdx+0x68] -> [rax+0x20]
+//
+// Position write instruction at CrimsonDesert.exe+36ADB8C:
+//   41 0F 11 45 00 (movups [r13+00], xmm0)
+//   r13 points directly at the authoritative position vector
+//
+// Candidate static base pointers (unstable, use sig scanning instead):
+//   CrimsonDesert.exe+05EDB400
+//   CrimsonDesert.exe+05C008A0
 // =========================================================================
 namespace offsets {
     namespace Player {
@@ -111,12 +121,35 @@ namespace offsets {
         // The stat entry is found by scanning the stat component (base+0x58 array).
         constexpr uint32_t STAT_COMPONENT = 0x58;  // Array of stat entries (from StatsAccess sig)
 
-        // Position: accessed through the position height hook.
-        // r13 = float* pointing to the position vector at hook time.
-        // Relative offsets within the position structure:
-        constexpr uint32_t POSITION_X     = 0x00;  // float (xmm0.f32[0])
-        constexpr uint32_t POSITION_Y     = 0x04;  // float (xmm0.f32[1]) - height
-        constexpr uint32_t POSITION_Z     = 0x08;  // float (xmm0.f32[2])
+        // Verified actor -> player_core chain (from position_research.md):
+        constexpr uint32_t ACTOR_TO_INNER = 0x40;  // First deref from actor base
+        constexpr uint32_t INNER_TO_CORE  = 0x08;  // Second deref to player_core
+
+        // Verified authoritative position (from position_research.md):
+        // Reached via: position_owner -> +0x248 -> position_struct -> +0x90
+        constexpr uint32_t POS_OWNER_TO_STRUCT = 0x248; // Deref to position struct
+        constexpr uint32_t POS_STRUCT_X   = 0x90;  // float - X axis (verified)
+        constexpr uint32_t POS_STRUCT_Y   = 0x94;  // float - Y axis (verified)
+        constexpr uint32_t POS_STRUCT_Z   = 0x98;  // float - Z axis (verified)
+        constexpr uint32_t POS_STRUCT_W   = 0x9C;  // float - W/padding (verified)
+
+        // Position also accessible at hook time via r13 pointer:
+        // r13 = float* pointing directly at the position vector
+        constexpr uint32_t POSITION_X     = 0x00;  // float (xmm0.f32[0]) - at r13
+        constexpr uint32_t POSITION_Y     = 0x04;  // float (xmm0.f32[1]) - height, at r13
+        constexpr uint32_t POSITION_Z     = 0x08;  // float (xmm0.f32[2]) - at r13
+
+        // Position cache (NOT authoritative, may lag behind):
+        // player_core -> +0xA0 -> cache_block
+        constexpr uint32_t POS_CACHE      = 0xA0;  // Deref to position cache block
+
+        // Status marker chain: [rdx+0x68] -> [rax+0x20]
+        constexpr uint32_t STATUS_MARKER_1 = 0x68;  // From rdx context
+        constexpr uint32_t STATUS_MARKER_2 = 0x20;  // Second deref to marker
+
+        // Position write RVA (relative to CrimsonDesert.exe base):
+        // Instruction at +0x36ADB8C: 41 0F 11 45 00 (movups [r13+00], xmm0)
+        constexpr uint32_t POS_WRITE_RVA  = 0x36ADB8C;
 
         // These offsets are from the actor base, discovered via EquipHide RE work.
         // They need fine-tuning with Cheat Engine / ReClass but are reasonable estimates

@@ -39,7 +39,29 @@ void PlayerManager::update(float delta_time) {
 
 Vec3 PlayerManager::local_position() const {
     if (local_player_ == 0) return {0, 0, 0};
-    // Position is a float[3] at the position pointer (from PositionHeightAccess hook)
+
+    // Verified authoritative position chain (from position_research.md):
+    //   actor -> +0x40 -> +0x08 -> player_core (-> +0x248 -> pos_struct -> +0x90)
+    // Try the verified chain first, fall back to direct position hook pointer.
+    uintptr_t player_core = resolve_ptr_chain(local_player_, {
+        offsets::Player::ACTOR_TO_INNER,
+        offsets::Player::INNER_TO_CORE
+    });
+
+    if (is_valid_ptr(player_core)) {
+        uintptr_t pos_struct = resolve_ptr_chain(player_core, {
+            offsets::Player::POS_OWNER_TO_STRUCT
+        });
+        if (is_valid_ptr(pos_struct)) {
+            return {
+                read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X),
+                read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y),
+                read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z)
+            };
+        }
+    }
+
+    // Fallback: read directly from actor base (from position hook r13)
     return {
         read_mem<float>(local_player_, offsets::Player::POSITION_X),
         read_mem<float>(local_player_, offsets::Player::POSITION_Y),
@@ -49,10 +71,22 @@ Vec3 PlayerManager::local_position() const {
 
 Quat PlayerManager::local_rotation() const {
     if (local_player_ == 0) return {0, 0, 0, 1};
-    // Rotation is typically 12 bytes after position (3 floats)
-    // This is an estimate - may need adjustment via RE
-    constexpr uint32_t ROT_OFFSET = 0x0C;
-    return read_mem<Quat>(local_player_, ROT_OFFSET);
+    // Rotation follows the position float4 (x,y,z,w) at +0x90.
+    // The next float4 at +0xA0 is likely rotation (needs verification).
+    uintptr_t player_core = resolve_ptr_chain(local_player_, {
+        offsets::Player::ACTOR_TO_INNER,
+        offsets::Player::INNER_TO_CORE
+    });
+    if (is_valid_ptr(player_core)) {
+        uintptr_t pos_struct = resolve_ptr_chain(player_core, {
+            offsets::Player::POS_OWNER_TO_STRUCT
+        });
+        if (is_valid_ptr(pos_struct)) {
+            // Position is at +0x90, rotation likely at +0xA0 (16 bytes later)
+            return read_mem<Quat>(pos_struct, offsets::Player::POS_STRUCT_X + 0x10);
+        }
+    }
+    return {0, 0, 0, 1};
 }
 
 float PlayerManager::local_health() const {

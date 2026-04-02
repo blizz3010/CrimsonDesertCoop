@@ -165,10 +165,34 @@ From FearLess CE community and CrimsonDesert-player-status-modifier:
 - ActorManager at WorldSystem + 0x30
 - UserActor (player) at ActorManager + 0x28
 
-### Position Data
-- Position accessed via PositionHeightAccess hook (r13 = float* position)
+### Position Data (Verified)
+The position system has two access methods:
+
+**Method 1: Authoritative position chain** (from position_research.md):
+```
+actor -> +0x40 -> +0x08 -> player_core -> +0x248 -> position_struct -> +0x90
+```
+- `position_struct + 0x90` = X axis (float, verified)
+- `position_struct + 0x94` = Y axis (float, verified)
+- `position_struct + 0x98` = Z axis (float, verified)
+- `position_struct + 0x9C` = W/padding (float)
+- Position write instruction at `CrimsonDesert.exe+36ADB8C`: `41 0F 11 45 00` (movups [r13+00], xmm0)
+
+**Method 2: Hook-time direct access** (via PositionHeightAccess sig):
+- r13 = float* pointing directly at the position vector
+- xmm0 contains position components
 - Position is float[3]: X at +0x00, Y/height at +0x04, Z at +0x08
-- xmm0 contains position components at hook time
+
+**Position cache (NOT authoritative, may lag):**
+```
+player_core -> +0xA0 -> cache_block
+```
+
+**Status marker chain:** `[rdx+0x68] -> [rax+0x20]`
+
+**Candidate static base pointers** (unstable, prefer sig scanning):
+- `CrimsonDesert.exe+05EDB400`
+- `CrimsonDesert.exe+05C008A0`
 
 ### Key Signatures (IDA-style, ? = wildcard)
 See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list.
