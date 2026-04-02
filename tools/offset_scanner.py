@@ -57,6 +57,16 @@ class CrimsonDesertScanner:
         "world_system_p2": "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
         # PartInOut transition (equipment visibility)
         "part_inout": "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
+        # Player base via ChildActor (from Tuuuup! CT, v1.01.02)
+        "player_base_childactor": "48 8B 47 68 48 8B 88 38 01 00 00 80",
+        # Friendship write (from Tuuuup!/bulle CT)
+        "friendship_write": "48 8B 58 10 48 8B 4C 24 30 4C",
+        # Base supply access (from Tuuuup! CT)
+        "base_supply": "48 83 7B 10 00 7E 53 48 8D 4B 08 66",
+        # Selected/hovered item (from Tuuuup! CT)
+        "selected_item": "48 8B 46 10 49 89 46 10 0F",
+        # Archery contest (from Tuuuup! CT)
+        "archery_contest": "8B 4F 10 3B C1 0F 93 C2",
         # Player base discovery (from bbfox0703 CT, v1.01.03, RIP-relative)
         "player_base_discovery": "48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B0 01 48 8B 53 08 48 8D 4C 24 40",
         # Item highlight / private storage (from bbfox0703 CT)

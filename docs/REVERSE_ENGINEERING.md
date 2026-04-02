@@ -231,6 +231,52 @@ Chain from character slot: `→ +0xB8 → +0x18 → +0x08 → {offset}`
 Item highlight read AOB: `0F BF 48 14 0F BF 40 12 2B C8 41`
 Max slot write AOB: `66 01 7B 16 48 8B C6`
 
+### ServerActor vs ChildActor (from Tuuuup! CT, v1.01.02)
+The game has a dual-actor architecture:
+- `childactor` = the in-game entity (what you see)
+- `serveractor` = `[childactor+0xA0]` - server-side authoritative state
+
+Direct character offsets from childactor:
+| Slot | Offset | Character |
+|------|--------|-----------|
+| 0 | +0x68  | First (Kliff) |
+| 1 | +0x168 | Second (Damiane) |
+| 2 | +0x268 | Third (party slot 3) |
+
+### ATK / Defence (from Tuuuup! CT, v1.01.02)
+Via chain: `+{slot} → +0x20 → +0x18 → +0x38 → {offset}`
+| Stat | Offset |
+|------|--------|
+| ATK | +0x00 |
+| Defence | +0x08 |
+
+### Max Stat Values (from Tuuuup! CT, v1.01.02)
+| Stat | Current | Max |
+|------|---------|-----|
+| Health | +0x08 | +0x18 |
+| Stamina | +0x488 | +0x498 |
+| Spirit | +0x518 | +0x528 |
+
+### Base Supply Structure (from Tuuuup! CT, v1.01.02)
+AOB: `48 83 7B 10 00 7E 53 48 8D 4B 08 66`
+| Resource | Offset |
+|----------|--------|
+| Points | +0x10 |
+| Money | +0x250 |
+| Food | +0x310 |
+| Wood/Timber | +0x3D0 |
+| Ore | +0x490 |
+| Clothing/Craft | +0x550 |
+
+### Item Structure (from Tuuuup! CT, v1.01.02)
+| Field | Offset | Type |
+|-------|--------|------|
+| Item ID | +0x08 | uint16 |
+| Refinement | +0x0A | uint16 |
+| Amount | +0x10 | int64 |
+| Reinforcement | +0x50 | int32 |
+| Server/Visual flag | +0x104 | byte (1=server) |
+
 ### Key Signatures (IDA-style, ? = wildcard)
 See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list.
 

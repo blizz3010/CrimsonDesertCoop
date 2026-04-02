@@ -17,6 +17,7 @@ namespace cdcoop {
 //   - FearLess Cheat Engine community - stat entry structure
 //   - Send @ Sintrix.net / FearlessRevolution - camera FOV/zoom, contribution, trust
 //   - bbfox0703 (Nexus Mods #64 CT) - player base pointer, character pointer chains, inventory
+//   - Tuuuup! (FearLess Revolution) - ServerActor, ATK/DEF, max stats, base supply, item struct
 //
 // Game version: v1.01.03 / Table v1.0.6 (March 2026)
 
@@ -142,9 +143,20 @@ namespace offsets {
         constexpr uint32_t CHAIN_2        = 0xD0;
 
         // Character-specific slot offsets (divergence point in chain)
+        // From bbfox0703 CT chain (via body slot navigation):
         constexpr uint32_t SLOT_KLIFF     = 0x68;   // Main character
         constexpr uint32_t SLOT_OONGKA    = 0xE0;   // Companion
         constexpr uint32_t SLOT_DAMIANE   = 0x168;  // Companion
+
+        // Alternative direct character offsets from childactor (Tuuuup! CT, v1.01.02):
+        // childactor+0x68 = first, +0x168 = second, +0x268 = third
+        constexpr uint32_t DIRECT_CHAR_0  = 0x68;   // First character (Kliff)
+        constexpr uint32_t DIRECT_CHAR_1  = 0x168;  // Second character (Damiane)
+        constexpr uint32_t DIRECT_CHAR_2  = 0x268;  // Third character (party slot 3)
+
+        // ServerActor pointer (from Tuuuup! CT):
+        // childactor+0xA0 = server-side actor representation
+        constexpr uint32_t SERVER_ACTOR   = 0xA0;
 
         // Suffix chain from character slot to stats component:
         // +{slot} -> +0x20 -> +0x18 -> +0x58 -> {stat_offset}
@@ -152,10 +164,25 @@ namespace offsets {
         constexpr uint32_t STAT_CHAIN_1   = 0x18;
         constexpr uint32_t STAT_CHAIN_2   = 0x58;   // Stats component base
 
-        // Stat offsets within stats component (from bbfox0703 CT, verified v1.01.03)
-        constexpr uint32_t HEALTH_OFFSET  = 0x08;   // 4-byte int (displayed * 1000)
-        constexpr uint32_t STAMINA_OFFSET = 0x488;  // 4-byte int
-        constexpr uint32_t SPIRIT_OFFSET  = 0x518;  // 4-byte int
+        // ATK/DEF chain (from Tuuuup! CT, v1.01.02):
+        // +{slot} -> +0x20 -> +0x18 -> +0x38 -> {offset}
+        constexpr uint32_t COMBAT_CHAIN_2 = 0x38;   // Combat stats component (instead of 0x58)
+        constexpr uint32_t ATK_OFFSET     = 0x00;   // int32 - attack power
+        constexpr uint32_t DEF_OFFSET     = 0x08;   // int32 - defence
+
+        // Stat offsets within stats component (+0x58)
+        // Verified by both bbfox0703 (v1.01.03) and Tuuuup! (v1.01.02) CTs
+        constexpr uint32_t HEALTH_OFFSET  = 0x08;   // 4-byte current HP
+        constexpr uint32_t HEALTH_MAX     = 0x18;   // 4-byte max HP (from Tuuuup!)
+        constexpr uint32_t STAMINA_OFFSET = 0x488;  // 4-byte current stamina
+        constexpr uint32_t STAMINA_MAX    = 0x498;  // 4-byte max stamina (from Tuuuup!)
+        constexpr uint32_t SPIRIT_OFFSET  = 0x518;  // 4-byte current spirit
+        constexpr uint32_t SPIRIT_MAX     = 0x528;  // 4-byte max spirit (from Tuuuup!)
+
+        // Stat ID offsets (type identifiers within stats component, from Tuuuup!):
+        constexpr uint32_t HEALTH_ID_OFF  = 0x00;   // HP stat type ID
+        constexpr uint32_t STAMINA_ID_OFF = 0x480;  // Stamina stat type ID
+        constexpr uint32_t SPIRIT_ID_OFF  = 0x510;  // Spirit stat type ID
 
         // Inventory chain (from character slot):
         // +{slot} -> +0xB8 -> +0x18 -> +0x08 -> {inv_offset}
@@ -244,6 +271,32 @@ namespace offsets {
         // Trust value offset within trust data struct (from Send's CE table)
         // Written via movups instructions at rdx+0x10 (gift) or rax+0x10 (shop NPC)
         constexpr uint32_t VALUE          = 0x10;   // trust value offset
+    }
+
+    // =========================================================================
+    // Base/Settlement supply structure (from Tuuuup! CT, v1.01.02)
+    // Found via AOB: 48 83 7B 10 00 7E 53 48 8D 4B 08 66
+    // Triggered when [rbx] == 0x165 (supply data identifier)
+    // =========================================================================
+    namespace BaseSupply {
+        constexpr uint32_t POINTS         = 0x10;   // int32
+        constexpr uint32_t MONEY          = 0x250;  // int32 - base money
+        constexpr uint32_t FOOD           = 0x310;  // int32 - food supplies
+        constexpr uint32_t WOOD           = 0x3D0;  // int32 - wood/timber
+        constexpr uint32_t ORE            = 0x490;  // int32 - ore supplies
+        constexpr uint32_t CRAFT          = 0x550;  // int32 - clothing/craft
+    }
+
+    // =========================================================================
+    // Item structure (from Tuuuup! CT, v1.01.02)
+    // Captured from selected/hovered item hook
+    // =========================================================================
+    namespace ItemEntry {
+        constexpr uint32_t ITEM_ID        = 0x08;   // uint16 - item identifier
+        constexpr uint32_t REFINEMENT     = 0x0A;   // uint16 - refinement level
+        constexpr uint32_t AMOUNT         = 0x10;   // int64 - item count
+        constexpr uint32_t REINFORCEMENT  = 0x50;   // int32 - reinforcement level
+        constexpr uint32_t FLAG           = 0x104;  // byte - 1=true/server, 0=visual/client
     }
 
     namespace Enemy {
@@ -374,6 +427,37 @@ namespace signatures {
     // --- MapInsert (from EquipHide) ---
     constexpr const char* MAP_INSERT_P1 =
         "4C 89 4C 24 20 53 55 56 57 41 54 41 55 48 83 EC 28 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA";
+
+    // --- Player Base via ChildActor (from Tuuuup! CT, game v1.01.02) ---
+    // Hook: rdi = childactor, [rdi+0xA0] = serveractor, [rdi+0x68] = first char data
+    // Original bytes: 48 8B 47 68 48 8B 88 38 01 00 00
+    constexpr const char* PLAYER_BASE_CHILDACTOR =
+        "48 8B 47 68 48 8B 88 38 01 00 00 80";
+
+    // --- Current Player / ServerChildOnlyInGameActor (from Tuuuup! CT, v1.01.02) ---
+    // Hook: rbx = pa::ServerChildOnlyInGameActor, [rbx+0x68]+0x1B0 = controller
+    constexpr const char* CURRENT_PLAYER =
+        "48 ? ? ? 48 ? ? ? ? ? ? ? 48 ? ? ? 0F B7 ? ? 66 ? ? ? ? ? ? ? B8 ? ? ? ? 66 ? ? 74 ? 48 ? ? ? ? ? ? ? E8 ? ? ? ? 0F B7 ? 48 ? ? ? ? ? ? ? 48 ? ? B2 ? FF ? ? 0F B7 ? 48 ? ? ? ? ? ? ? E8 ? ? ? ? 3A";
+
+    // --- Friendship Write (from Tuuuup!/bulle, game v1.01.02) ---
+    // Hook: [rax+0x10] = friendship value
+    constexpr const char* FRIENDSHIP_WRITE =
+        "48 8B 58 10 48 8B 4C 24 30 4C";
+
+    // --- Base Supply Access (from Tuuuup! CT, game v1.01.02) ---
+    // Hook: rbx = supply entry, [rbx] == 0x165 identifies supply data
+    constexpr const char* BASE_SUPPLY =
+        "48 83 7B 10 00 7E 53 48 8D 4B 08 66";
+
+    // --- Selected/Hovered Item (from Tuuuup! CT, game v1.01.02) ---
+    // Hook: rsi = item struct, [rsi+0x104]==1 for true/server item
+    constexpr const char* SELECTED_ITEM =
+        "48 8B 46 10 49 89 46 10 0F";
+
+    // --- Archery Contest (from Tuuuup! CT, game v1.01.02) ---
+    // Hook: rdi = contest data, [rdi+0x10] = score, [rdi+0x14] = target
+    constexpr const char* ARCHERY_CONTEST =
+        "8B 4F 10 3B C1 0F 93 C2";
 
     // --- Player Base Discovery (from bbfox0703 CT, game v1.01.03) ---
     // RIP-relative pointer resolution to find the Player static base dynamically
