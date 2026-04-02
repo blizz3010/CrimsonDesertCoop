@@ -57,6 +57,17 @@ class CrimsonDesertScanner:
         "world_system_p2": "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
         # PartInOut transition (equipment visibility)
         "part_inout": "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
+        # Camera Zoom/FOV write (from Send's CE table, v1.00.03)
+        # movss [r12+0xD8], xmm0 - r12 = camera struct, 0xD8 = zoom/FOV
+        "camera_zoom_fov": "F3 41 0F 11 84 24 D8 00 00 00",
+        # Contribution data (from Send's CE table, v1.00.03)
+        "contribution_map": "45 8B 69 08 44 89 AD F8 02 00 00",
+        # Trust gift write (from Send's CE table)
+        "trust_gift": "0F 11 4A 10 0F 10 47 20 0F 11 42 20 0F 10 4F 30 0F 11 4A 30 F2",
+        # Trust shop NPC write (from Send's CE table)
+        "trust_gift_shop": "0F 11 50 10 0F 11 58 20 0F 11 60",
+        # Item count decrease (from Send's CE table / FearLess community)
+        "item_count_decrease": "49 29 4C 07 10",
     }
 
     def __init__(self, pid: Optional[int] = None):

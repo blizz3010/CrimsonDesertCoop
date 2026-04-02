@@ -197,6 +197,33 @@ player_core -> +0xA0 -> cache_block
 ### Key Signatures (IDA-style, ? = wildcard)
 See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list.
 
+### Camera Zoom/FOV (from Send's CE table, v1.00.03)
+The camera zoom/FOV value is written by:
+```asm
+movss [r12+0xD8], xmm0    ; F3 41 0F 11 84 24 D8 00 00 00
+```
+- `r12` = camera struct base pointer
+- Offset `0xD8` = zoom/FOV float value
+- Default: ~8.0 at max zoom out
+- AOB: `F3 41 0F 11 84 24 D8 00 00 00`
+
+### Contribution System (from Send's CE table, v1.00.03)
+- Static base: `CrimsonDesert.exe+05CE0928`
+- Pointer chain to contribution points: +0x80 → +0x60 → +0x208 → +0x478 → +0x0 → +0x0 → +0x10
+- Contribution data struct (captured from hook via r9):
+  - Level at +0x08 (int32)
+  - Experience at +0x10 (int32)
+- AOB: `45 8B 69 08 44 89 AD F8 02 00 00`
+
+### Trust System (from Send's CE table, v1.00.03)
+- Trust value at struct+0x10
+- Gift write AOB: `0F 11 4A 10 0F 10 47 20 0F 11 42 20 0F 10 4F 30 0F 11 4A 30 F2`
+- ShopNPC write AOB: `0F 11 50 10 0F 11 58 20 0F 11 60`
+
+### Item Count (from FearLess community)
+- Decrease instruction: `49 29 4C 07 10` (sub [r15+rax+10], rcx)
+- NOP to prevent item count decrease
+
 ### Community Resources
 - [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage hooks
 - [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
@@ -204,6 +231,7 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full 
 - [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Address value table, XML configs
 - [Nexus Mods Cheat Table](https://www.nexusmods.com/crimsondesert/mods/64) - Cheat Engine table with pointer paths
 - [FearLess CE Thread](https://fearlessrevolution.com/viewtopic.php?t=38679) - Community cheat tables, pointer research
+- [FearLess CE Trust/FOV/Contribution](https://fearlessrevolution.com/viewtopic.php?t=38691) - Camera FOV, contribution, trust offsets by Send
 
 ## Game Version Tracking
 

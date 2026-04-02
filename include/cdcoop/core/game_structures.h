@@ -15,8 +15,9 @@ namespace cdcoop {
 //   - CrimsonDesertTools/EquipHide (tkhquang) - WorldSystem, actor structure, body navigation
 //   - CrimsonDesertModdingResearch (marvelmaster) - address value table
 //   - FearLess Cheat Engine community - stat entry structure
+//   - Send @ Sintrix.net / FearlessRevolution - camera FOV/zoom, contribution, trust
 //
-// Game version: v1.00.02 / v1.01.03 (March 2026)
+// Game version: v1.00.03 / 1.0.0.534 (March 2026)
 
 struct Vec3 {
     float x, y, z;
@@ -172,6 +173,29 @@ namespace offsets {
         constexpr uint32_t IS_ACTIVE      = 0x1C;   // bool (PartInOutSocket visible byte)
     }
 
+    namespace Camera {
+        // Camera struct offsets (from Send's CE table, game v1.00.03)
+        // The camera zoom/FOV write instruction:
+        //   movss [r12+0xD8], xmm0
+        // r12 = camera struct base during the zoom/FOV write path
+        constexpr uint32_t ZOOM_FOV       = 0xD8;   // float - zoom/FOV value (default ~8.0 at max zoom out)
+    }
+
+    namespace Contribution {
+        // Contribution system pointer chain (from Send's CE table, game v1.00.03)
+        // Base: CrimsonDesert.exe+05CE0928
+        // Chain: +0x80 -> +0x60 -> +0x208 -> +0x478 -> +0x0 -> +0x0 -> +0x10
+        constexpr uint32_t STATIC_BASE_RVA = 0x05CE0928; // RVA from CrimsonDesert.exe base
+        constexpr uint32_t LEVEL          = 0x08;   // int32 - contribution level (from r9+0x08)
+        constexpr uint32_t EXPERIENCE     = 0x10;   // int32 - contribution experience (from r9+0x10)
+    }
+
+    namespace Trust {
+        // Trust value offset within trust data struct (from Send's CE table)
+        // Written via movups instructions at rdx+0x10 (gift) or rax+0x10 (shop NPC)
+        constexpr uint32_t VALUE          = 0x10;   // trust value offset
+    }
+
     namespace Enemy {
         // Enemies use the same actor base. Stats use the same StatEntry format.
         constexpr uint32_t AGGRO_TARGET   = 0x150;  // ptr - current aggro target actor
@@ -300,6 +324,38 @@ namespace signatures {
     // --- MapInsert (from EquipHide) ---
     constexpr const char* MAP_INSERT_P1 =
         "4C 89 4C 24 20 53 55 56 57 41 54 41 55 48 83 EC 28 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA";
+
+    // --- Camera Zoom/FOV Write (from Send's CE table, game v1.00.03) ---
+    // Instruction: movss [r12+0xD8], xmm0 (writes zoom/FOV to camera struct)
+    // Non-wildcard bytes: F3 41 0F 11 84 24 D8 00 00 00
+    // r12 = camera struct base, offset 0xD8 = zoom/FOV value
+    constexpr const char* CAMERA_ZOOM_FOV =
+        "F3 41 0F 11 84 24 D8 00 00 00 F3 ? ? ? ? F3 ? ? ? ? ? ? ? ? ? ? F3 ? ? ? ? F3 ? ? ? ? ? ? ? ? ? ? F2 ? ? ? ? F2 ? ? ? ? ? ? ? ? ? ? ? 8B";
+    constexpr const char* CAMERA_ZOOM_FOV_NONWILD =
+        "F3 41 0F 11 84 24 D8 00 00 00";
+
+    // --- Contribution Overworld Map (from Send's CE table, game v1.00.03) ---
+    // Non-wildcard bytes: 45 8B 69 08 44 89 AD F8 02 00 00
+    // At hook: r9 = contribution data struct, level at +0x08, exp at +0x10
+    constexpr const char* CONTRIBUTION_MAP =
+        "45 ? ? ? 44 ? ? ? ? ? ? ? E9 ? ? ? ? 49 ? ? ? 0F ? ? ? ? ? ? 45 ? ? ?";
+
+    // --- Trust Gift Write (from Send's CE table, game v1.00.03) ---
+    // Non-wildcard bytes: 0F 11 4A 10 0F 10 47 20 0F 11 42 20 0F 10 4F 30 0F 11 4A 30 F2
+    // At hook: rdx = trust data struct, trust value at +0x10
+    constexpr const char* TRUST_GIFT =
+        "0F 11 ? 10 0F 10 ? 20 0F 11 ? 20 0F 10 ? 30 0F 11 ? 30 F2 ? ? ? ? ? ? ? F2 ? ? ? ? ? ? ? 48 83 ? ? 41 5E";
+
+    // --- Trust Gift ShopNPC (from Send's CE table, game v1.00.03) ---
+    // Non-wildcard bytes: 0F 11 50 10 0F 11 58 20 0F 11 60
+    constexpr const char* TRUST_GIFT_SHOP =
+        "0F 11 ? 10 0F 11 ? 20 0F 11 ? ? F2 ? ? ? ? ? ? ? 48 83";
+
+    // --- Item Count Decrease (from Send's CE table / FearLess community) ---
+    // Non-wildcard bytes: 49 29 4C 07 10
+    // NOP this to prevent item count decrease
+    constexpr const char* ITEM_COUNT_DECREASE =
+        "49 29 4C 07 10";
 }
 
 // =========================================================================
@@ -314,10 +370,13 @@ struct RuntimeOffsets {
     uintptr_t player_stats_component = 0; // Stats component base
     uintptr_t actor_manager_ptr = 0;      // ActorManager for entity iteration
     uintptr_t child_actor_vtbl = 0;       // ChildActor vtable for type checking
+    uintptr_t camera_struct_ptr = 0;      // Camera struct base (r12 from zoom/FOV hook)
+    uintptr_t contribution_data_ptr = 0;  // Contribution data struct (r9 from contribution hook)
 
     bool world_system_resolved = false;
     bool player_resolved = false;
     bool position_resolved = false;
+    bool camera_resolved = false;
 };
 
 // Global runtime offsets instance
