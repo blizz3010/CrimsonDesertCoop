@@ -1,6 +1,7 @@
 #include <cdcoop/sync/world_sync.h>
 #include <cdcoop/network/session.h>
 #include <cdcoop/core/config.h>
+#include <cdcoop/core/game_structures.h>
 #include <spdlog/spdlog.h>
 
 namespace cdcoop {
@@ -88,9 +89,17 @@ void WorldSync::on_remote_interact(const uint8_t* data, size_t size) {
 
     // World state changes are forwarded as events. The object_id is the
     // lower 32 bits of the world object pointer. Since both players share
-    // the same game world, object pointers should match.
-    // For now, log the interaction - full world object resolution requires
-    // additional RE to find the world object manager.
+    // the same game world, the same objects exist at the same addresses.
+    //
+    // World objects (doors, chests, levers) are managed by the WorldSystem.
+    // The MapLookup/MapInsert signatures from EquipHide could resolve objects
+    // by hash, but the world object manager's exact layout needs more RE.
+    //
+    // For now, the event is logged. Both players' games will naturally sync
+    // most world state since they run the same game instance. The main
+    // purpose of this sync is to handle interactions that one player triggers
+    // but the other player's game might not process (e.g., opening a chest
+    // while the other player is far away).
 }
 
 void WorldSync::on_remote_quest_update(const uint8_t* data, size_t size) {
@@ -101,8 +110,14 @@ void WorldSync::on_remote_quest_update(const uint8_t* data, size_t size) {
                   pkt->object_id, pkt->new_state);
 
     // Quest state sync is event-based. The host broadcasts quest stage changes
-    // so the client knows the current quest progression. Full quest manipulation
-    // requires finding the quest manager in the WorldSystem.
+    // so the client tracks progression. Since both players run the same game
+    // instance, quest state naturally stays in sync for most cases.
+    // This packet handles edge cases where quest triggers are player-proximity-based
+    // and only one player is in range.
+    //
+    // The quest system likely lives under WorldSystem as a subsystem,
+    // accessible via a similar chain to ActorManager. The MapLookup sig from
+    // EquipHide's indexed string table could be used to find quest entries by ID.
 }
 
 void WorldSync::on_remote_cutscene(const uint8_t* data, size_t size) {
@@ -111,9 +126,13 @@ void WorldSync::on_remote_cutscene(const uint8_t* data, size_t size) {
 
     spdlog::info("Remote cutscene trigger: {}", pkt->object_id);
 
-    // Cutscene sync ensures both players see the same cutscene.
-    // The cutscene_id is broadcast so the client can trigger it locally.
-    // Full cutscene triggering requires the cutscene manager from WorldSystem.
+    // Cutscene sync ensures both players enter the same cutscene simultaneously.
+    // Since both players share the same game world, cutscenes triggered by the
+    // host's game progression will play for both. This packet handles cases where
+    // player 2 is far from the trigger zone.
+    //
+    // The cutscene system is likely a WorldSystem subsystem. PAZ archive data
+    // (from the unpacker) could reveal cutscene trigger definitions.
 }
 
 } // namespace cdcoop

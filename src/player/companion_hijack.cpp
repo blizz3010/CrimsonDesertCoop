@@ -134,16 +134,31 @@ void CompanionHijack::deactivate() {
 void CompanionHijack::set_position(const Vec3& pos, const Quat& rot) {
     if (!active_ || !is_valid_ptr(hijacked_entity_)) return;
 
-    // Write position directly to the companion entity's position vector.
-    // Companion entities use the same position layout as the player:
-    // float[3] at the position offset within the actor.
+    // Use the verified position chain: actor -> +0x40 -> +0x08 -> core -> +0x248 -> +0x90
+    // This writes to the authoritative position, not a cache.
+    uintptr_t core = resolve_ptr_chain(hijacked_entity_, {
+        offsets::Player::ACTOR_TO_INNER,
+        offsets::Player::INNER_TO_CORE
+    });
+
+    if (is_valid_ptr(core)) {
+        uintptr_t pos_struct = resolve_ptr_chain(core, {
+            offsets::Player::POS_OWNER_TO_STRUCT
+        });
+        if (is_valid_ptr(pos_struct)) {
+            write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X, pos.x);
+            write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y, pos.y);
+            write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z, pos.z);
+            // Rotation: write to the next float4 slot after position (+0xA0)
+            write_mem<Quat>(pos_struct, offsets::Player::POS_STRUCT_X + 0x10, rot);
+            return;
+        }
+    }
+
+    // Fallback: direct write to entity base (less reliable)
     write_mem<float>(hijacked_entity_, offsets::Player::POSITION_X, pos.x);
     write_mem<float>(hijacked_entity_, offsets::Player::POSITION_Y, pos.y);
     write_mem<float>(hijacked_entity_, offsets::Player::POSITION_Z, pos.z);
-
-    // Write rotation (4 floats after position, offset 0x0C from position base)
-    constexpr uint32_t ROT_OFFSET = 0x0C;
-    write_mem<Quat>(hijacked_entity_, ROT_OFFSET, rot);
 }
 
 void CompanionHijack::set_animation(uint32_t anim_id, float blend, float speed, float time) {

@@ -73,9 +73,11 @@ void EnemySync::update(float delta_time) {
         };
         uint32_t state = read_mem<uint32_t>(entity, offsets::Enemy::STATE);
 
-        // For health, enemies use the same stat entry system
-        // Use a simplified read for now
-        float health = 100.0f; // Default until stat entry is resolved per-enemy
+        // Read enemy health via the stat entry system (same as player)
+        // HP is int64 * 1000 in the stat component
+        int64_t raw_hp = read_mem<int64_t>(entity,
+            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE);
+        float health = static_cast<float>(raw_hp) / 1000.0f;
 
         uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
         on_enemy_state_changed(entity_id, pos, {0,0,0,1}, health, state);
@@ -136,20 +138,78 @@ void EnemySync::report_damage(uint32_t entity_id, float damage) {
 
 void EnemySync::apply_coop_scaling() {
     auto& cfg = get_config();
+    auto& rt = get_runtime_offsets();
+
     spdlog::info("Applying co-op scaling: HP x{:.1f}, DMG x{:.1f}",
                   cfg.enemy_hp_multiplier, cfg.enemy_dmg_multiplier);
 
-    // TODO: iterate all loaded enemies and scale their max HP
-    // Save original values in original_stats_ for revert
-    // This requires finding the enemy list in memory
+    if (!is_valid_ptr(rt.actor_manager_ptr)) {
+        spdlog::warn("EnemySync: cannot apply scaling - ActorManager not available");
+        return;
+    }
+
+    uintptr_t player = rt.player_actor_ptr;
+    uintptr_t companion = CompanionHijack::instance().get_entity_ptr();
+
+    // Scan body slots for enemy entities and scale their HP
+    constexpr int MAX_BODY_SLOTS = 8;
+    constexpr uint32_t BODY_SLOT_BASE = ActorStructure::BODY_SLOT_0;
+    int scaled_count = 0;
+
+    for (int i = 0; i < MAX_BODY_SLOTS; i++) {
+        uint32_t slot_offset = BODY_SLOT_BASE + static_cast<uint32_t>(i * 8);
+        uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
+        if (!is_valid_ptr(entity)) continue;
+        if (entity == player || entity == companion) continue;
+
+        uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
+
+        // Try to find the entity's stat component and scale max health
+        uintptr_t stat_comp = entity + offsets::Player::STAT_COMPONENT;
+        if (is_valid_ptr(stat_comp)) {
+            // Read the first stat entry (health = type 0) from the stat array
+            // Entries are 16 bytes each, health is typically the first
+            int64_t max_hp = read_mem<int64_t>(stat_comp, StatEntry::MAX_VALUE);
+            if (max_hp > 0) {
+                // Save original value
+                original_stats_[entity_id] = { static_cast<float>(max_hp) };
+
+                // Scale up
+                int64_t scaled_hp = static_cast<int64_t>(max_hp * cfg.enemy_hp_multiplier);
+                write_mem<int64_t>(entity, offsets::Player::STAT_COMPONENT + StatEntry::MAX_VALUE, scaled_hp);
+                write_mem<int64_t>(entity, offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE, scaled_hp);
+                scaled_count++;
+            }
+        }
+    }
+
+    spdlog::info("Co-op scaling applied to {} enemies", scaled_count);
 }
 
 void EnemySync::revert_coop_scaling() {
     if (original_stats_.empty()) return;
 
+    auto& rt = get_runtime_offsets();
     spdlog::info("Reverting co-op scaling for {} enemies", original_stats_.size());
 
-    // TODO: restore original HP values from original_stats_
+    if (is_valid_ptr(rt.actor_manager_ptr)) {
+        constexpr int MAX_BODY_SLOTS = 8;
+        constexpr uint32_t BODY_SLOT_BASE = ActorStructure::BODY_SLOT_0;
+
+        for (int i = 0; i < MAX_BODY_SLOTS; i++) {
+            uint32_t slot_offset = BODY_SLOT_BASE + static_cast<uint32_t>(i * 8);
+            uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
+            if (!is_valid_ptr(entity)) continue;
+
+            uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
+            auto it = original_stats_.find(entity_id);
+            if (it != original_stats_.end()) {
+                int64_t original_hp = static_cast<int64_t>(it->second.max_health);
+                write_mem<int64_t>(entity, offsets::Player::STAT_COMPONENT + StatEntry::MAX_VALUE, original_hp);
+            }
+        }
+    }
+
     original_stats_.clear();
 }
 
@@ -157,24 +217,90 @@ void EnemySync::revert_coop_scaling() {
 
 void EnemySync::on_remote_enemy_state(const uint8_t* data, size_t size) {
     if (size < sizeof(EnemyStatePacket)) return;
+    auto* pkt = reinterpret_cast<const EnemyStatePacket*>(data);
 
-    // Client receives authoritative enemy state from host
-    // Apply position/health/state to the local enemy entity
-    // auto* pkt = reinterpret_cast<const EnemyStatePacket*>(data);
-    // TODO: find local enemy by entity_id and update its state
+    // Client receives authoritative enemy state from host.
+    // Find the local enemy entity by scanning body slots and matching entity_id.
+    auto& rt = get_runtime_offsets();
+    if (!is_valid_ptr(rt.actor_manager_ptr)) return;
+
+    constexpr int MAX_BODY_SLOTS = 8;
+    constexpr uint32_t BODY_SLOT_BASE = ActorStructure::BODY_SLOT_0;
+
+    for (int i = 0; i < MAX_BODY_SLOTS; i++) {
+        uint32_t slot_offset = BODY_SLOT_BASE + static_cast<uint32_t>(i * 8);
+        uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
+        if (!is_valid_ptr(entity)) continue;
+
+        uint32_t eid = static_cast<uint32_t>(entity & 0xFFFFFFFF);
+        if (eid != pkt->entity_id) continue;
+
+        // Apply position from host
+        uintptr_t core = resolve_ptr_chain(entity, {
+            offsets::Player::ACTOR_TO_INNER,
+            offsets::Player::INNER_TO_CORE
+        });
+        if (is_valid_ptr(core)) {
+            uintptr_t pos_struct = resolve_ptr_chain(core, {
+                offsets::Player::POS_OWNER_TO_STRUCT
+            });
+            if (is_valid_ptr(pos_struct)) {
+                write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X, pkt->position.x);
+                write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y, pkt->position.y);
+                write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z, pkt->position.z);
+            }
+        }
+
+        // Apply state
+        write_mem<uint32_t>(entity, offsets::Enemy::STATE, pkt->state);
+        break;
+    }
 }
 
 void EnemySync::on_remote_enemy_damage(const uint8_t* data, size_t size) {
     if (size < sizeof(EnemyDamagePacket)) return;
 
-    // Host receives damage report from client
+    // Host receives damage report from client and validates
     if (!Session::instance().is_host()) return;
 
     auto* pkt = reinterpret_cast<const EnemyDamagePacket*>(data);
     spdlog::debug("Remote damage: enemy {} took {:.1f} damage", pkt->entity_id, pkt->damage);
 
-    // TODO: apply damage to the enemy entity
-    // This is where the host validates that the damage is reasonable
+    // Validate damage is reasonable (anti-cheat: cap at 10x normal)
+    float max_reasonable_damage = 50000.0f;
+    float validated_damage = (pkt->damage > max_reasonable_damage) ? max_reasonable_damage : pkt->damage;
+
+    // Find the enemy and apply damage by reducing current HP
+    auto& rt = get_runtime_offsets();
+    if (!is_valid_ptr(rt.actor_manager_ptr)) return;
+
+    constexpr int MAX_BODY_SLOTS = 8;
+    constexpr uint32_t BODY_SLOT_BASE = ActorStructure::BODY_SLOT_0;
+
+    for (int i = 0; i < MAX_BODY_SLOTS; i++) {
+        uint32_t slot_offset = BODY_SLOT_BASE + static_cast<uint32_t>(i * 8);
+        uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
+        if (!is_valid_ptr(entity)) continue;
+
+        uint32_t eid = static_cast<uint32_t>(entity & 0xFFFFFFFF);
+        if (eid != pkt->entity_id) continue;
+
+        // Read current HP, subtract damage, write back
+        // HP is int64 * 1000 in the stat entry system
+        int64_t current_hp = read_mem<int64_t>(entity,
+            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE);
+        int64_t damage_scaled = static_cast<int64_t>(validated_damage * 1000.0f);
+        int64_t new_hp = current_hp - damage_scaled;
+
+        if (new_hp <= 0) {
+            new_hp = 0;
+            on_enemy_death(pkt->entity_id);
+        }
+
+        write_mem<int64_t>(entity,
+            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE, new_hp);
+        break;
+    }
 }
 
 void EnemySync::on_remote_enemy_death(const uint8_t* data, size_t size) {
@@ -183,7 +309,26 @@ void EnemySync::on_remote_enemy_death(const uint8_t* data, size_t size) {
     auto* pkt = reinterpret_cast<const EnemyStatePacket*>(data);
     spdlog::info("Enemy {} died", pkt->entity_id);
 
-    // TODO: trigger death on the local enemy entity
+    // Set enemy HP to 0 and state to dead
+    auto& rt = get_runtime_offsets();
+    if (!is_valid_ptr(rt.actor_manager_ptr)) return;
+
+    constexpr int MAX_BODY_SLOTS = 8;
+    constexpr uint32_t BODY_SLOT_BASE = ActorStructure::BODY_SLOT_0;
+
+    for (int i = 0; i < MAX_BODY_SLOTS; i++) {
+        uint32_t slot_offset = BODY_SLOT_BASE + static_cast<uint32_t>(i * 8);
+        uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
+        if (!is_valid_ptr(entity)) continue;
+
+        uint32_t eid = static_cast<uint32_t>(entity & 0xFFFFFFFF);
+        if (eid != pkt->entity_id) continue;
+
+        // Zero out HP
+        write_mem<int64_t>(entity,
+            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE, 0);
+        break;
+    }
 }
 
 } // namespace cdcoop

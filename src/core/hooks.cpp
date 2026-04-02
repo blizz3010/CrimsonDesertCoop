@@ -97,6 +97,22 @@ bool HookManager::initialize() {
         hooks_failed++;
     }
 
+    // --- Game tick: use DX12 Present as the frame tick ---
+    // No dedicated game tick signature has been found for the BlackSpace Engine.
+    // Instead, the DX12 Present hook (installed by Overlay) fires once per frame
+    // and serves as our sync tick. The game_tick_detour is wired into the
+    // Present callback via Overlay::render() -> game_tick_detour.
+    // This is a common approach used by many game mods.
+    spdlog::info("Game tick: using DX12 Present hook as frame tick (no dedicated sig needed)");
+
+    // --- Camera: hook the position write to also capture camera data ---
+    // Camera mods for Crimson Desert (CDCamera, UCM) modify XML files, not memory.
+    // The camera system is controlled by playercamerapreset.xml in PAZ archive 0010.
+    // For co-op camera adjustments, we read camera params from the XML preset system
+    // rather than hooking a camera function directly.
+    // A camera state offset might exist near the position owner struct, but this
+    // needs further RE. For now, the tether system handles player distance limits.
+
     spdlog::info("Hook installation complete: {} installed, {} failed", hooks_installed, hooks_failed);
     if (hooks_failed > 0) {
         spdlog::warn("Some hooks failed - game version may have changed.");
@@ -332,9 +348,36 @@ void __cdecl world_state_detour(void* world_obj, uint32_t state_id, uint32_t new
 void __cdecl camera_detour(void* camera, void* target_transform) {
     camera_hook.call<void>(camera, target_transform);
 
-    // In co-op, we may want to adjust the camera to keep both players in view
-    // or implement a tethered camera system
-    // TODO: implement camera adjustments for co-op
+    // In co-op, adjust the camera to frame both players when tether is active.
+    // When players are far apart, pull the camera back to show both.
+    // Camera parameters are primarily controlled via playercamerapreset.xml
+    // (in PAZ archive 0010), but we can nudge the camera target position here.
+    if (!Session::instance().is_active()) return;
+
+    auto& ps = PlayerSync::instance();
+    if (!ps.is_tether_active()) return;
+
+    // When tether is active, offset the camera target toward the midpoint
+    // between both players. This keeps both in view without jarring snaps.
+    auto local_pos = PlayerManager::instance().local_position();
+    auto remote_pos = ps.remote_state().position;
+
+    // Midpoint between players
+    Vec3 midpoint = {
+        (local_pos.x + remote_pos.x) * 0.5f,
+        (local_pos.y + remote_pos.y) * 0.5f,
+        (local_pos.z + remote_pos.z) * 0.5f
+    };
+
+    // Blend the camera target toward the midpoint (30% pull)
+    // This is a gentle nudge - the game's camera system handles the rest
+    if (target_transform && is_valid_ptr(reinterpret_cast<uintptr_t>(target_transform))) {
+        auto* target = reinterpret_cast<float*>(target_transform);
+        constexpr float blend = 0.3f;
+        target[0] += (midpoint.x - target[0]) * blend;
+        target[1] += (midpoint.y - target[1]) * blend;
+        target[2] += (midpoint.z - target[2]) * blend;
+    }
 }
 
 } // namespace hooks
