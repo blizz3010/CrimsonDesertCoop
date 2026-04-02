@@ -1,5 +1,6 @@
 #include <cdcoop/player/player_manager.h>
 #include <cdcoop/core/hooks.h>
+#include <cdcoop/core/game_structures.h>
 #include <cdcoop/player/companion_hijack.h>
 #include <spdlog/spdlog.h>
 
@@ -38,17 +39,33 @@ void PlayerManager::update(float delta_time) {
 
 Vec3 PlayerManager::local_position() const {
     if (local_player_ == 0) return {0, 0, 0};
-    return read_mem<Vec3>(local_player_, offsets::Player::POSITION);
+    // Position is a float[3] at the position pointer (from PositionHeightAccess hook)
+    return {
+        read_mem<float>(local_player_, offsets::Player::POSITION_X),
+        read_mem<float>(local_player_, offsets::Player::POSITION_Y),
+        read_mem<float>(local_player_, offsets::Player::POSITION_Z)
+    };
 }
 
 Quat PlayerManager::local_rotation() const {
     if (local_player_ == 0) return {0, 0, 0, 1};
-    return read_mem<Quat>(local_player_, offsets::Player::ROTATION);
+    // Rotation is typically 12 bytes after position (3 floats)
+    // This is an estimate - may need adjustment via RE
+    constexpr uint32_t ROT_OFFSET = 0x0C;
+    return read_mem<Quat>(local_player_, ROT_OFFSET);
 }
 
 float PlayerManager::local_health() const {
     if (local_player_ == 0) return 0;
-    return read_mem<float>(local_player_, offsets::Player::HEALTH);
+    // Health is accessed via the stat entry system.
+    // The stats component is at actor + 0x58, entries are 16 bytes each.
+    // Health is stat type 0, stored as int64 * 1000.
+    auto& rt = get_runtime_offsets();
+    if (rt.player_stats_component != 0) {
+        int64_t raw = read_mem<int64_t>(rt.player_stats_component, StatEntry::CURRENT_VALUE);
+        return static_cast<float>(raw) / 1000.0f;
+    }
+    return 0;
 }
 
 uintptr_t PlayerManager::remote_player() const {
@@ -80,37 +97,53 @@ bool PlayerManager::is_remote_spawned() const {
 }
 
 void PlayerManager::find_local_player() {
-    // Strategy to find the player entity:
+    // Player finding strategy uses the WorldSystem chain discovered by
+    // CrimsonDesertTools/EquipHide:
+    //   WorldSystem -> ActorManager (+0x30) -> UserActor (+0x28)
     //
-    // Method 1: Signature scan for the player singleton access function
-    // Many games have a static function like GetPlayerCharacter() that
-    // returns the player pointer. Find this via signature scanning.
+    // The WorldSystem singleton is resolved via RIP-relative sig scan
+    // in HookManager::resolve_world_system().
     //
-    // Method 2: Pointer chain from game instance
-    // GameInstance (static) -> World -> PlayerController -> PlayerCharacter
-    //
-    // Method 3: The existing CrimsonDesert-player-status-modifier project
-    // already found player stat write functions. The first argument to those
-    // functions is typically the player pointer. Use the same signatures
-    // and read the pointer from the function's context.
-    //
-    // For now, we use Method 2 as a starting point:
+    // Additionally, the PlayerPointerCapture hook (from player-status-modifier)
+    // gives us the player pointer at runtime via rax register.
 
+    auto& rt = get_runtime_offsets();
+
+    // Method 1: Use the pre-resolved player actor from WorldSystem chain
+    if (rt.player_resolved && is_valid_ptr(rt.player_actor_ptr)) {
+        local_player_ = rt.player_actor_ptr;
+        game_instance_ = rt.world_system_ptr;
+        spdlog::info("PlayerManager: found player via WorldSystem chain at 0x{:X}", local_player_);
+        return;
+    }
+
+    // Method 2: Try resolving the chain ourselves if WorldSystem is known
+    if (rt.world_system_resolved && is_valid_ptr(rt.world_system_ptr)) {
+        auto& hooks = HookManager::instance();
+        if (hooks.resolve_player_actor()) {
+            local_player_ = rt.player_actor_ptr;
+            game_instance_ = rt.world_system_ptr;
+            spdlog::info("PlayerManager: resolved player at 0x{:X}", local_player_);
+            return;
+        }
+    }
+
+    // Method 3: Try the PlayerPointerCapture signature directly
+    // This scans for the function that accesses the player pointer
     auto& hooks = HookManager::instance();
+    auto result = hooks.sig_scan(signatures::PLAYER_PTR_PRIMARY, "PlayerPointerCapture");
+    if (!result) {
+        result = hooks.sig_scan(signatures::PLAYER_PTR_FALLBACK, "PlayerPointerCapture_FB");
+    }
 
-    // TODO: implement actual player finding
-    // game_instance_ = resolve_ptr_chain(hooks.game_base(), {
-    //     offsets::World::GAME_INSTANCE
-    // });
-    //
-    // if (game_instance_) {
-    //     local_player_ = resolve_ptr_chain(game_instance_, {
-    //         offsets::World::PLAYER_PTR
-    //     });
-    // }
-
-    // PLACEHOLDER: This will be 0 until proper offsets are discovered
-    spdlog::debug("PlayerManager: searching for player pointer...");
+    if (result) {
+        spdlog::info("PlayerManager: found PlayerPointerCapture function at 0x{:X}", result.address);
+        spdlog::info("PlayerManager: player pointer will be captured at runtime via hook");
+        // The actual pointer capture happens in the hook callback
+    } else {
+        spdlog::warn("PlayerManager: all player finding methods failed");
+        spdlog::warn("PlayerManager: player pointer will be unavailable until resolved");
+    }
 }
 
 } // namespace cdcoop

@@ -1,6 +1,8 @@
 #include <cdcoop/sync/enemy_sync.h>
 #include <cdcoop/network/session.h>
 #include <cdcoop/core/config.h>
+#include <cdcoop/core/game_structures.h>
+#include <cdcoop/player/companion_hijack.h>
 #include <spdlog/spdlog.h>
 
 namespace cdcoop {
@@ -44,11 +46,40 @@ void EnemySync::update(float delta_time) {
     if (send_timer_ < ENEMY_SYNC_RATE) return;
     send_timer_ = 0.0f;
 
-    // TODO: iterate the game's enemy list and broadcast state for each
-    // This requires:
-    // 1. Finding the enemy manager pointer (offsets::World::ENEMY_LIST)
-    // 2. Iterating the enemy array
-    // 3. For each enemy, read position/health/state and send to client
+    // Iterate actors from the ActorManager to find enemies and broadcast state.
+    // The ActorManager holds all entities; we identify enemies by checking
+    // that they are not the player or a hijacked companion.
+    auto& rt = get_runtime_offsets();
+    if (!is_valid_ptr(rt.actor_manager_ptr)) return;
+
+    uintptr_t player = rt.player_actor_ptr;
+    uintptr_t companion = CompanionHijack::instance().get_entity_ptr();
+
+    // Scan body slots for enemy entities (same slot structure as companion scan)
+    constexpr int MAX_BODY_SLOTS = 8;
+    constexpr uint32_t BODY_SLOT_BASE = ActorStructure::BODY_SLOT_0;
+
+    for (int i = 0; i < MAX_BODY_SLOTS; i++) {
+        uint32_t slot_offset = BODY_SLOT_BASE + static_cast<uint32_t>(i * 8);
+        uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
+        if (!is_valid_ptr(entity)) continue;
+        if (entity == player || entity == companion) continue;
+
+        // Read enemy state and broadcast
+        Vec3 pos = {
+            read_mem<float>(entity, offsets::Player::POSITION_X),
+            read_mem<float>(entity, offsets::Player::POSITION_Y),
+            read_mem<float>(entity, offsets::Player::POSITION_Z)
+        };
+        uint32_t state = read_mem<uint32_t>(entity, offsets::Enemy::STATE);
+
+        // For health, enemies use the same stat entry system
+        // Use a simplified read for now
+        float health = 100.0f; // Default until stat entry is resolved per-enemy
+
+        uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
+        on_enemy_state_changed(entity_id, pos, {0,0,0,1}, health, state);
+    }
 }
 
 void EnemySync::on_enemy_state_changed(uint32_t entity_id, const Vec3& pos,

@@ -31,13 +31,32 @@ except ImportError:
 class CrimsonDesertScanner:
     PROCESS_NAME = "CrimsonDesert.exe"
 
-    # Known signatures (PLACEHOLDERS - update from RE work)
+    # Known signatures from community RE work (March 2026, v1.00.02 / v1.01.03)
+    # Sources: CrimsonDesert-player-status-modifier, CrimsonDesertTools/EquipHide
     SIGNATURES = {
-        "player_health_write": "PLACEHOLDER",
-        "player_position_write": "PLACEHOLDER",
-        "companion_spawn": "PLACEHOLDER",
-        "damage_calc": "PLACEHOLDER",
-        "game_tick": "PLACEHOLDER",
+        # Player pointer capture (from player-status-modifier)
+        "player_ptr_capture": "49 8B 7D 18 49 8B 44 24 40 48 8B 40 68 48 8B 70 20",
+        "player_ptr_capture_fb": "49 8B 44 24 40 48 8B 40 68 48 8B 70 20",
+        # Position height access (r13 = float* pos [X, Y, Z])
+        "player_position_write": "49 3B F7 0F 8C ?? ?? ?? ?? 0F 28 C6 F3 45 0F 5C C8 41 0F 58 45 00 41 0F 11 45 00 48 8B BB F8 00 00 00 48 63 83 00 01 00 00",
+        "player_position_write_fb": "0F 28 C6 F3 45 0F 5C C8 41 0F 58 45 00 41 0F 11 45 00",
+        # Stats access (stat entry array, entries 16 bytes, base+0x58)
+        "stats_access": "48 8D ?? ?? 48 C1 E0 04 48 03 46 58 ?? 8B ?? 24",
+        "stats_access_fb": "48 C1 E0 04 48 03 46 58",
+        # Stat write (shared by health/stamina/spirit)
+        "stat_write": "48 2B 47 18 48 39 5F 18 48 0F 4F C2 48 89 47 20 48 FF 47 48 48 89 5F 08 48 8B 5C 24 48 48 89 77 38 66 89 6F 50",
+        "stat_write_fb": "48 FF 47 48 48 89 5F 08 48 8B 5C 24 48 48 89 77 38",
+        # Damage slot access (r15 = source, r12 = amount)
+        "damage_slot": "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3",
+        # Item gain
+        "item_gain": "49 01 4C 38 10",
+        # Durability write
+        "durability_write": "66 3B CF 66 0F 4C F9 66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20",
+        # WorldSystem singleton (RIP-relative, from EquipHide)
+        "world_system": "48 83 EC 28 48 8B 0D ?? ?? ?? ?? 48 8B 49 50 E8 ?? ?? ?? ?? 84 C0 0F 94 C0 48 83 C4 28 C3",
+        "world_system_p2": "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
+        # PartInOut transition (equipment visibility)
+        "part_inout": "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
     }
 
     def __init__(self, pid: Optional[int] = None):
