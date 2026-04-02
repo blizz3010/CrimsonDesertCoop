@@ -53,6 +53,12 @@ bool HookManager::initialize() {
     // This gives us access to the actor manager and player actor
     resolve_world_system();
 
+    // --- Player base pointer resolution (from bbfox0703 CT, v1.01.03) ---
+    // Additional fallback: resolve the player static base via RIP-relative sig
+    if (!get_runtime_offsets().player_resolved) {
+        resolve_player_base();
+    }
+
     // --- Player position hook ---
     // From player-status-modifier: hooks the position height access function
     // At hook point: r13 = float* position array [X, Y, Z]
@@ -105,13 +111,22 @@ bool HookManager::initialize() {
     // This is a common approach used by many game mods.
     spdlog::info("Game tick: using DX12 Present hook as frame tick (no dedicated sig needed)");
 
-    // --- Camera: hook the position write to also capture camera data ---
-    // Camera mods for Crimson Desert (CDCamera, UCM) modify XML files, not memory.
-    // The camera system is controlled by playercamerapreset.xml in PAZ archive 0010.
-    // For co-op camera adjustments, we read camera params from the XML preset system
-    // rather than hooking a camera function directly.
-    // A camera state offset might exist near the position owner struct, but this
-    // needs further RE. For now, the tether system handles player distance limits.
+    // --- Camera Zoom/FOV hook (from Send's CE table, game v1.00.03) ---
+    // Hooks the instruction: movss [r12+0xD8], xmm0
+    // r12 = camera struct base, 0xD8 = zoom/FOV offset
+    // This lets us capture the camera struct pointer and modify FOV for co-op
+    if (create_hook(signatures::CAMERA_ZOOM_FOV, "CameraZoomFOV",
+                    hooks::camera_detour, hooks::camera_hook)) {
+        spdlog::info("Installed CameraZoomFOV hook (full sig)");
+        hooks_installed++;
+    } else if (create_hook(signatures::CAMERA_ZOOM_FOV_NONWILD, "CameraZoomFOV",
+                           hooks::camera_detour, hooks::camera_hook)) {
+        spdlog::info("Installed CameraZoomFOV hook (non-wildcard sig)");
+        hooks_installed++;
+    } else {
+        spdlog::warn("Failed to install CameraZoomFOV hook - co-op camera tether disabled");
+        hooks_failed++;
+    }
 
     spdlog::info("Hook installation complete: {} installed, {} failed", hooks_installed, hooks_failed);
     if (hooks_failed > 0) {
@@ -226,6 +241,61 @@ bool HookManager::resolve_player_actor() {
     rt.player_resolved = true;
     spdlog::info("Player actor resolved at 0x{:X}", player);
     return true;
+}
+
+bool HookManager::resolve_player_base() {
+    auto& rt = get_runtime_offsets();
+
+    // Method 1: Signature-based RIP-relative resolution (from bbfox0703 CT)
+    auto result = sig_scan(signatures::PLAYER_BASE_DISCOVERY, "PlayerBaseDiscovery");
+    if (result) {
+        uintptr_t rip_addr = result.address + signatures::PLAYER_BASE_DISCOVERY_RIP_OFFSET;
+        uintptr_t player_base_storage = MemoryScanner::follow_rel32(rip_addr, 0);
+
+        if (is_valid_ptr(player_base_storage)) {
+            uintptr_t player_base = *reinterpret_cast<uintptr_t*>(player_base_storage);
+            if (is_valid_ptr(player_base)) {
+                // Follow the chain to find the player actor:
+                // base -> +0x18 -> +0xA0 -> +0xD0 -> +0x68 (Kliff)
+                uintptr_t actor = resolve_ptr_chain(player_base, {
+                    offsets::PlayerBase::CHAIN_0,
+                    offsets::PlayerBase::CHAIN_1,
+                    offsets::PlayerBase::CHAIN_2,
+                    offsets::PlayerBase::SLOT_KLIFF
+                });
+
+                if (is_valid_ptr(actor)) {
+                    rt.player_actor_ptr = actor;
+                    rt.player_resolved = true;
+                    spdlog::info("Player resolved via PlayerBaseDiscovery sig at 0x{:X}", actor);
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Method 2: Hardcoded static base (last resort, v1.01.03)
+    uintptr_t static_base = game_base_ + offsets::PlayerBase::STATIC_RVA;
+    uintptr_t player_base = *reinterpret_cast<uintptr_t*>(static_base);
+    if (is_valid_ptr(player_base)) {
+        uintptr_t actor = resolve_ptr_chain(player_base, {
+            offsets::PlayerBase::CHAIN_0,
+            offsets::PlayerBase::CHAIN_1,
+            offsets::PlayerBase::CHAIN_2,
+            offsets::PlayerBase::SLOT_KLIFF
+        });
+
+        if (is_valid_ptr(actor)) {
+            rt.player_actor_ptr = actor;
+            rt.player_resolved = true;
+            spdlog::info("Player resolved via static base (0x{:X}) at 0x{:X}",
+                         offsets::PlayerBase::STATIC_RVA, actor);
+            return true;
+        }
+    }
+
+    spdlog::warn("Failed to resolve player via PlayerBase methods");
+    return false;
 }
 
 // =========================================================================
@@ -345,38 +415,55 @@ void __cdecl world_state_detour(void* world_obj, uint32_t state_id, uint32_t new
     }
 }
 
-void __cdecl camera_detour(void* camera, void* target_transform) {
-    camera_hook.call<void>(camera, target_transform);
+void __cdecl camera_detour(void* camera_struct, void* unused) {
+    camera_hook.call<void>(camera_struct, unused);
 
-    // In co-op, adjust the camera to frame both players when tether is active.
-    // When players are far apart, pull the camera back to show both.
-    // Camera parameters are primarily controlled via playercamerapreset.xml
-    // (in PAZ archive 0010), but we can nudge the camera target position here.
+    // Camera Zoom/FOV hook (from Send's CE table, game v1.00.03)
+    // At hook point: r12 = camera struct base, offset 0xD8 = zoom/FOV float
+    // The original instruction: movss [r12+0xD8], xmm0
+    //
+    // We capture the camera struct pointer for co-op use and can adjust
+    // the zoom/FOV to pull the camera back when players are far apart.
+
+    auto camera_addr = reinterpret_cast<uintptr_t>(camera_struct);
+    if (!is_valid_ptr(camera_addr)) return;
+
+    // Capture camera struct pointer for other systems to use
+    auto& rt = get_runtime_offsets();
+    rt.camera_struct_ptr = camera_addr;
+    rt.camera_resolved = true;
+
     if (!Session::instance().is_active()) return;
 
     auto& ps = PlayerSync::instance();
     if (!ps.is_tether_active()) return;
 
-    // When tether is active, offset the camera target toward the midpoint
-    // between both players. This keeps both in view without jarring snaps.
+    // When players are far apart, increase zoom distance to keep both in view
     auto local_pos = PlayerManager::instance().local_position();
     auto remote_pos = ps.remote_state().position;
 
-    // Midpoint between players
-    Vec3 midpoint = {
-        (local_pos.x + remote_pos.x) * 0.5f,
-        (local_pos.y + remote_pos.y) * 0.5f,
-        (local_pos.z + remote_pos.z) * 0.5f
-    };
+    Vec3 diff = local_pos - remote_pos;
+    float dist_sq = diff.length_sq();
 
-    // Blend the camera target toward the midpoint (30% pull)
-    // This is a gentle nudge - the game's camera system handles the rest
-    if (target_transform && is_valid_ptr(reinterpret_cast<uintptr_t>(target_transform))) {
-        auto* target = reinterpret_cast<float*>(target_transform);
-        constexpr float blend = 0.3f;
-        target[0] += (midpoint.x - target[0]) * blend;
-        target[1] += (midpoint.y - target[1]) * blend;
-        target[2] += (midpoint.z - target[2]) * blend;
+    // Read current zoom/FOV from camera struct + 0xD8
+    float current_fov = read_mem<float>(camera_addr, offsets::Camera::ZOOM_FOV);
+
+    // If players are more than 15m apart, start pulling camera back
+    constexpr float TETHER_START_SQ = 15.0f * 15.0f;   // 225
+    constexpr float TETHER_MAX_SQ   = 40.0f * 40.0f;   // 1600
+    constexpr float BASE_ZOOM       = 8.0f;             // Default max zoom out
+    constexpr float MAX_ZOOM         = 14.0f;            // Extended zoom for co-op
+
+    if (dist_sq > TETHER_START_SQ) {
+        // Lerp zoom from BASE_ZOOM to MAX_ZOOM based on player distance
+        float t = (dist_sq - TETHER_START_SQ) / (TETHER_MAX_SQ - TETHER_START_SQ);
+        if (t > 1.0f) t = 1.0f;
+        float target_zoom = BASE_ZOOM + (MAX_ZOOM - BASE_ZOOM) * t;
+
+        // Only override if we'd pull further out than the game's current value
+        if (target_zoom > current_fov) {
+            write_mem<float>(camera_addr, offsets::Camera::ZOOM_FOV, target_zoom);
+        }
     }
 }
 

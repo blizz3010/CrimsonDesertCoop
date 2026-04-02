@@ -57,6 +57,39 @@ class CrimsonDesertScanner:
         "world_system_p2": "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
         # PartInOut transition (equipment visibility)
         "part_inout": "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
+        # Player base via ChildActor (from Tuuuup! CT, v1.01.02)
+        "player_base_childactor": "48 8B 47 68 48 8B 88 38 01 00 00 80",
+        # Friendship write (from Tuuuup!/bulle CT)
+        "friendship_write": "48 8B 58 10 48 8B 4C 24 30 4C",
+        # Base supply access (from Tuuuup! CT)
+        "base_supply": "48 83 7B 10 00 7E 53 48 8D 4B 08 66",
+        # Selected/hovered item (from Tuuuup! CT)
+        "selected_item": "48 8B 46 10 49 89 46 10 0F",
+        # Archery contest (from Tuuuup! CT)
+        "archery_contest": "8B 4F 10 3B C1 0F 93 C2",
+        # Player base discovery (from bbfox0703 CT, v1.01.03, RIP-relative)
+        "player_base_discovery": "48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B0 01 48 8B 53 08 48 8D 4C 24 40",
+        # Item highlight / private storage (from bbfox0703 CT)
+        "item_highlight": "49 83 7A 10 00 7E 37",
+        # Contest score (from bbfox0703 CT)
+        "contest_score": "48 8B 43 68 48 8B 48 20 48 8B 81",
+        # Contribution gain (from bbfox0703 CT)
+        "contribution_gain": "4D 8B 60 10 89 45 C0",
+        # Inventory slot read (from bbfox0703 CT)
+        "inventory_slot_read": "0F BF 48 14 0F BF 40 12 2B C8 41",
+        # Max slot add (from bbfox0703 CT)
+        "max_slot_add": "66 01 7B 16 48 8B C6",
+        # Camera Zoom/FOV write (from Send's CE table, v1.00.03)
+        # movss [r12+0xD8], xmm0 - r12 = camera struct, 0xD8 = zoom/FOV
+        "camera_zoom_fov": "F3 41 0F 11 84 24 D8 00 00 00",
+        # Contribution data (from Send's CE table, v1.00.03)
+        "contribution_map": "45 8B 69 08 44 89 AD F8 02 00 00",
+        # Trust gift write (from Send's CE table)
+        "trust_gift": "0F 11 4A 10 0F 10 47 20 0F 11 42 20 0F 10 4F 30 0F 11 4A 30 F2",
+        # Trust shop NPC write (from Send's CE table)
+        "trust_gift_shop": "0F 11 50 10 0F 11 58 20 0F 11 60",
+        # Item count decrease (from Send's CE table / FearLess community)
+        "item_count_decrease": "49 29 4C 07 10",
     }
 
     def __init__(self, pid: Optional[int] = None):

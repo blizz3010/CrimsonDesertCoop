@@ -194,8 +194,118 @@ player_core -> +0xA0 -> cache_block
 - `CrimsonDesert.exe+05EDB400`
 - `CrimsonDesert.exe+05C008A0`
 
+### Static Player Base Pointer (from bbfox0703 CT, v1.01.03)
+```
+Player = CrimsonDesert.exe+5CC7618
+```
+Discovery AOB (RIP-relative): `48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B0 01 48 8B 53 08 48 8D 4C 24 40`
+
+### Character Pointer Chains (from bbfox0703 CT, v1.01.03)
+All characters share a common chain prefix:
+```
+[Player+0x18] → +0xA0 → +0xD0 → {character_slot} → +0x20 → +0x18 → +0x58 → {stat}
+```
+
+Character slot offsets (point of divergence):
+| Character | Slot Offset | Role |
+|-----------|-------------|------|
+| Kliff     | **0x68**    | Main player character |
+| Oongka    | **0xE0**    | Companion |
+| Damiane   | **0x168**   | Companion |
+
+Stat offsets within the stats component (+0x58):
+| Stat | Offset | Type |
+|------|--------|------|
+| Health | **+0x08** | 4-byte int (displayed * 1000) |
+| Stamina | **+0x488** | 4-byte int |
+| Spirit | **+0x518** | 4-byte int |
+
+### Inventory Structure (from bbfox0703 CT, v1.01.03)
+Chain from character slot: `→ +0xB8 → +0x18 → +0x08 → {offset}`
+| Field | Offset | Type |
+|-------|--------|------|
+| Used Slots | +0x12 | uint16 |
+| Total Slots | +0x14 | uint16 |
+| Bonus Slots | +0x16 | uint16 |
+
+Item highlight read AOB: `0F BF 48 14 0F BF 40 12 2B C8 41`
+Max slot write AOB: `66 01 7B 16 48 8B C6`
+
+### ServerActor vs ChildActor (from Tuuuup! CT, v1.01.02)
+The game has a dual-actor architecture:
+- `childactor` = the in-game entity (what you see)
+- `serveractor` = `[childactor+0xA0]` - server-side authoritative state
+
+Direct character offsets from childactor:
+| Slot | Offset | Character |
+|------|--------|-----------|
+| 0 | +0x68  | First (Kliff) |
+| 1 | +0x168 | Second (Damiane) |
+| 2 | +0x268 | Third (party slot 3) |
+
+### ATK / Defence (from Tuuuup! CT, v1.01.02)
+Via chain: `+{slot} → +0x20 → +0x18 → +0x38 → {offset}`
+| Stat | Offset |
+|------|--------|
+| ATK | +0x00 |
+| Defence | +0x08 |
+
+### Max Stat Values (from Tuuuup! CT, v1.01.02)
+| Stat | Current | Max |
+|------|---------|-----|
+| Health | +0x08 | +0x18 |
+| Stamina | +0x488 | +0x498 |
+| Spirit | +0x518 | +0x528 |
+
+### Base Supply Structure (from Tuuuup! CT, v1.01.02)
+AOB: `48 83 7B 10 00 7E 53 48 8D 4B 08 66`
+| Resource | Offset |
+|----------|--------|
+| Points | +0x10 |
+| Money | +0x250 |
+| Food | +0x310 |
+| Wood/Timber | +0x3D0 |
+| Ore | +0x490 |
+| Clothing/Craft | +0x550 |
+
+### Item Structure (from Tuuuup! CT, v1.01.02)
+| Field | Offset | Type |
+|-------|--------|------|
+| Item ID | +0x08 | uint16 |
+| Refinement | +0x0A | uint16 |
+| Amount | +0x10 | int64 |
+| Reinforcement | +0x50 | int32 |
+| Server/Visual flag | +0x104 | byte (1=server) |
+
 ### Key Signatures (IDA-style, ? = wildcard)
 See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list.
+
+### Camera Zoom/FOV (from Send's CE table, v1.00.03)
+The camera zoom/FOV value is written by:
+```asm
+movss [r12+0xD8], xmm0    ; F3 41 0F 11 84 24 D8 00 00 00
+```
+- `r12` = camera struct base pointer
+- Offset `0xD8` = zoom/FOV float value
+- Default: ~8.0 at max zoom out
+- AOB: `F3 41 0F 11 84 24 D8 00 00 00`
+
+### Contribution System (from Send's CE table, v1.00.03)
+- Static base: `CrimsonDesert.exe+05CE0928`
+- Pointer chain to contribution points: +0x80 → +0x60 → +0x208 → +0x478 → +0x0 → +0x0 → +0x10
+- Contribution data struct (captured from hook via r9):
+  - Level at +0x08 (int32)
+  - Experience at +0x10 (int32)
+- AOB: `45 8B 69 08 44 89 AD F8 02 00 00`
+
+### Trust System (from Send's CE table, v1.00.03)
+- Trust value at struct+0x10
+- Gift write AOB: `0F 11 4A 10 0F 10 47 20 0F 11 42 20 0F 10 4F 30 0F 11 4A 30 F2`
+- ShopNPC write AOB: `0F 11 50 10 0F 11 58 20 0F 11 60`
+
+### Item Count (from FearLess community)
+- Decrease instruction: `49 29 4C 07 10` (sub [r15+rax+10], rcx)
+- NOP to prevent item count decrease
 
 ### Community Resources
 - [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage hooks
@@ -204,6 +314,7 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full 
 - [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Address value table, XML configs
 - [Nexus Mods Cheat Table](https://www.nexusmods.com/crimsondesert/mods/64) - Cheat Engine table with pointer paths
 - [FearLess CE Thread](https://fearlessrevolution.com/viewtopic.php?t=38679) - Community cheat tables, pointer research
+- [FearLess CE Trust/FOV/Contribution](https://fearlessrevolution.com/viewtopic.php?t=38691) - Camera FOV, contribution, trust offsets by Send
 
 ## Game Version Tracking
 

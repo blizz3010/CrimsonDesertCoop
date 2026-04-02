@@ -141,6 +141,13 @@ void Overlay::render_debug_panel() {
                 static_cast<unsigned long long>(rt.player_actor_ptr),
                 rt.player_resolved ? "OK" : "NOT FOUND");
     ImGui::Text("Position: %s", rt.position_resolved ? "TRACKING" : "WAITING");
+    ImGui::Text("Camera: 0x%llX (%s)",
+                static_cast<unsigned long long>(rt.camera_struct_ptr),
+                rt.camera_resolved ? "OK" : "NOT FOUND");
+    if (rt.camera_resolved) {
+        float fov = read_mem<float>(rt.camera_struct_ptr, offsets::Camera::ZOOM_FOV);
+        ImGui::Text("  Zoom/FOV: %.2f", fov);
+    }
 
     ImGui::End();
 }
