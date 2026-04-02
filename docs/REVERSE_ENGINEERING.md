@@ -142,12 +142,53 @@ The [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpack
 - [ReHax Forum](https://reshax.com/) - PAZ/PAMT extraction discussion
 - [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Community RE efforts
 
+## Known Offsets and Signatures (March 2026)
+
+The following offsets and signatures have been sourced from the active modding community:
+
+### Stat Entry Structure (Health / Stamina / Spirit)
+From FearLess CE community and CrimsonDesert-player-status-modifier:
+- Health, stamina, and spirit are **8-byte values** (int64, displayed value * 1000)
+- All three share the same write opcode
+- Stat type at +0x00 (0=Health, 17=Stamina, 18=Spirit)
+- Current value at +0x08, Max value at +0x18
+- Stats component is at actor base + 0x58, entries are 16 bytes each
+
+### Actor Structure (from EquipHide RE work)
+- VTable at +0x00
+- Component link / AI controller at +0x48
+- Body slots (child actors) at +0xD0 through +0x108 (8 slots, 8 bytes each)
+- Body -> VisCtrl chain: +0x68 -> +0x40 -> +0xE8
+
+### WorldSystem Chain (from EquipHide)
+- WorldSystem is a singleton found via RIP-relative pointer in signature scan
+- ActorManager at WorldSystem + 0x30
+- UserActor (player) at ActorManager + 0x28
+
+### Position Data
+- Position accessed via PositionHeightAccess hook (r13 = float* position)
+- Position is float[3]: X at +0x00, Y/height at +0x04, Z at +0x08
+- xmm0 contains position components at hook time
+
+### Key Signatures (IDA-style, ? = wildcard)
+See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list.
+
+### Community Resources
+- [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage hooks
+- [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
+- [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework used by CD mods
+- [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Address value table, XML configs
+- [Nexus Mods Cheat Table](https://www.nexusmods.com/crimsondesert/mods/64) - Cheat Engine table with pointer paths
+- [FearLess CE Thread](https://fearlessrevolution.com/viewtopic.php?t=38679) - Community cheat tables, pointer research
+
 ## Game Version Tracking
 
 Offsets WILL change with game patches. Maintain a version table:
 
-| Game Version | Player Position | Player Health | Companion AI | Notes |
-|-------------|----------------|---------------|-------------|-------|
-| 1.0.0       | TODO           | TODO          | TODO        | Launch version |
+| Game Version | Position Sig | Stats Sig | WorldSystem Sig | Notes |
+|-------------|-------------|-----------|-----------------|-------|
+| 1.00.02     | Verified    | Verified  | Verified        | Launch version |
+| 1.00.03     | Verified    | Verified  | Verified        | March 25 patch - minor ptr adjustments |
+| 1.01.03     | Verified    | Verified  | Verified        | March hotfix |
 
 Use the signature scanner to automatically find updated offsets after patches rather than hardcoding addresses.

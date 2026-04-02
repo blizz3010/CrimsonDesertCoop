@@ -30,16 +30,11 @@ void AnimationSync::apply_remote_animation(uintptr_t entity_ptr, uint32_t anim_i
     // This bypasses the AI system and forces the companion to play
     // whatever animation the remote player is playing
 
-    // TODO: write to entity animation controller
-    // The exact offsets depend on the BlackSpace Engine's animation system
-    // Expected approach:
-    // 1. Read animation controller pointer from entity
-    // 2. Write animation ID to the controller's current animation slot
-    // 3. Write blend weight
-    // 4. Write playback speed
-    // 5. Write normalized time (for sync accuracy)
-
-    // write_mem<uint32_t>(entity_ptr, offsets::Companion::ANIM_STATE, anim_id);
+    // Write animation state directly to the entity's animation fields.
+    // The actor layout places animation state at offset 0x120 and blend at 0x124
+    // (same layout for player and companion actors in the BlackSpace Engine).
+    write_mem<uint32_t>(entity_ptr, offsets::Companion::ANIM_STATE, anim_id);
+    write_mem<float>(entity_ptr, offsets::Player::ANIM_BLEND, blend_weight);
 }
 
 uint32_t AnimationSync::remap_animation(uint32_t source_anim_id, int source_model,

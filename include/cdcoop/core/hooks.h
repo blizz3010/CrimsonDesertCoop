@@ -47,6 +47,12 @@ public:
     uintptr_t game_base() const { return game_base_; }
     size_t game_size() const { return game_size_; }
 
+    // Resolve the WorldSystem singleton from signature scanning
+    bool resolve_world_system();
+
+    // Resolve the player actor from the WorldSystem chain
+    bool resolve_player_actor();
+
 private:
     HookManager() = default;
 
