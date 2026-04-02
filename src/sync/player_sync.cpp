@@ -74,7 +74,10 @@ void PlayerSync::update(float delta_time) {
         pkt.position = pm.local_position();
         pkt.rotation = pm.local_rotation();
         pkt.health = pm.local_health();
-        // TODO: fill remaining fields
+        pkt.max_health = pm.local_health(); // TODO: separate max_health accessor
+        pkt.animation_id = 0;
+        pkt.anim_blend = 0.0f;
+        pkt.movement_flags = 0;
         session.send_packet(pkt);
     }
 
@@ -177,8 +180,22 @@ void PlayerSync::on_remote_combat(const uint8_t* data, size_t size) {
     auto* pkt = reinterpret_cast<const PlayerCombatPacket*>(data);
 
     spdlog::debug("Remote combat action: type={}, skill={}", pkt->action, pkt->skill_id);
-    // TODO: trigger combat animation on the remote player entity
-    // TODO: if host, apply damage to the target enemy
+
+    // Trigger combat animation on the companion entity (remote player)
+    auto& hijack = CompanionHijack::instance();
+    if (hijack.is_active()) {
+        // Combat actions map to animation IDs. The action byte encodes:
+        //   0 = light attack, 1 = heavy attack, 2 = skill, 3 = dodge
+        // Use a base animation offset + action for now (needs real anim IDs from RE)
+        uint32_t combat_anim_base = 1000; // Placeholder base for combat anims
+        hijack.set_animation(combat_anim_base + pkt->action, 1.0f, 1.0f, 0.0f);
+    }
+
+    // If we're the host, apply damage to the target enemy
+    if (Session::instance().is_host() && pkt->target_entity_id != 0) {
+        EnemySync::instance().report_damage(pkt->target_entity_id, 0.0f);
+        spdlog::debug("Host: remote player attacked enemy {}", pkt->target_entity_id);
+    }
 }
 
 void PlayerSync::on_remote_full_state(const uint8_t* data, size_t size) {
