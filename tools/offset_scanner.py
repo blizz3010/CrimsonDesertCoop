@@ -57,6 +57,18 @@ class CrimsonDesertScanner:
         "world_system_p2": "80 B8 49 01 00 00 00 75 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D8 00 00 00",
         # PartInOut transition (equipment visibility)
         "part_inout": "41 0F B6 45 1C 3C 03 74 ?? 45 84 C0 75 ?? 84 C0",
+        # Player base discovery (from bbfox0703 CT, v1.01.03, RIP-relative)
+        "player_base_discovery": "48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B0 01 48 8B 53 08 48 8D 4C 24 40",
+        # Item highlight / private storage (from bbfox0703 CT)
+        "item_highlight": "49 83 7A 10 00 7E 37",
+        # Contest score (from bbfox0703 CT)
+        "contest_score": "48 8B 43 68 48 8B 48 20 48 8B 81",
+        # Contribution gain (from bbfox0703 CT)
+        "contribution_gain": "4D 8B 60 10 89 45 C0",
+        # Inventory slot read (from bbfox0703 CT)
+        "inventory_slot_read": "0F BF 48 14 0F BF 40 12 2B C8 41",
+        # Max slot add (from bbfox0703 CT)
+        "max_slot_add": "66 01 7B 16 48 8B C6",
         # Camera Zoom/FOV write (from Send's CE table, v1.00.03)
         # movss [r12+0xD8], xmm0 - r12 = camera struct, 0xD8 = zoom/FOV
         "camera_zoom_fov": "F3 41 0F 11 84 24 D8 00 00 00",

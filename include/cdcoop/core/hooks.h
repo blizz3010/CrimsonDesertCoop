@@ -53,6 +53,9 @@ public:
     // Resolve the player actor from the WorldSystem chain
     bool resolve_player_actor();
 
+    // Resolve the player via static base pointer (from bbfox0703 CT)
+    bool resolve_player_base();
+
 private:
     HookManager() = default;
 

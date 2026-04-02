@@ -16,8 +16,9 @@ namespace cdcoop {
 //   - CrimsonDesertModdingResearch (marvelmaster) - address value table
 //   - FearLess Cheat Engine community - stat entry structure
 //   - Send @ Sintrix.net / FearlessRevolution - camera FOV/zoom, contribution, trust
+//   - bbfox0703 (Nexus Mods #64 CT) - player base pointer, character pointer chains, inventory
 //
-// Game version: v1.00.03 / 1.0.0.534 (March 2026)
+// Game version: v1.01.03 / Table v1.0.6 (March 2026)
 
 struct Vec3 {
     float x, y, z;
@@ -112,11 +113,60 @@ namespace PartInOutSocket {
 //   41 0F 11 45 00 (movups [r13+00], xmm0)
 //   r13 points directly at the authoritative position vector
 //
-// Candidate static base pointers (unstable, use sig scanning instead):
-//   CrimsonDesert.exe+05EDB400
-//   CrimsonDesert.exe+05C008A0
+// Static base pointers (from CE tables, may break on patch):
+//   CrimsonDesert.exe+05CC7618  (bbfox0703, v1.01.03 - most recent)
+//   CrimsonDesert.exe+05CE0928  (Send, v1.00.03)
+//   CrimsonDesert.exe+05EDB400  (FearLess community)
+//   CrimsonDesert.exe+05C008A0  (FearLess community)
+//
+// Verified full pointer chains (from bbfox0703 CT, game v1.01.03):
+//   Player base = CrimsonDesert.exe+5CC7618
+//   Health chain:  [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x08
+//   Stamina chain: [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x488
+//   Spirit chain:  [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x518
+//   Character slot offsets: Kliff=0x68, Oongka=0xE0, Damiane=0x168
 // =========================================================================
 namespace offsets {
+
+    // =========================================================================
+    // Static player base pointer (from bbfox0703 CT, v1.01.03)
+    // Use signature scanning (PLAYER_BASE_DISCOVERY) for dynamic resolution.
+    // =========================================================================
+    namespace PlayerBase {
+        constexpr uint32_t STATIC_RVA     = 0x05CC7618; // CrimsonDesert.exe+5CC7618 (v1.01.03)
+
+        // Common chain prefix from base to character body:
+        // [base+0x18] -> +0xA0 -> +0xD0 -> {character_slot}
+        constexpr uint32_t CHAIN_0        = 0x18;
+        constexpr uint32_t CHAIN_1        = 0xA0;
+        constexpr uint32_t CHAIN_2        = 0xD0;
+
+        // Character-specific slot offsets (divergence point in chain)
+        constexpr uint32_t SLOT_KLIFF     = 0x68;   // Main character
+        constexpr uint32_t SLOT_OONGKA    = 0xE0;   // Companion
+        constexpr uint32_t SLOT_DAMIANE   = 0x168;  // Companion
+
+        // Suffix chain from character slot to stats component:
+        // +{slot} -> +0x20 -> +0x18 -> +0x58 -> {stat_offset}
+        constexpr uint32_t STAT_CHAIN_0   = 0x20;
+        constexpr uint32_t STAT_CHAIN_1   = 0x18;
+        constexpr uint32_t STAT_CHAIN_2   = 0x58;   // Stats component base
+
+        // Stat offsets within stats component (from bbfox0703 CT, verified v1.01.03)
+        constexpr uint32_t HEALTH_OFFSET  = 0x08;   // 4-byte int (displayed * 1000)
+        constexpr uint32_t STAMINA_OFFSET = 0x488;  // 4-byte int
+        constexpr uint32_t SPIRIT_OFFSET  = 0x518;  // 4-byte int
+
+        // Inventory chain (from character slot):
+        // +{slot} -> +0xB8 -> +0x18 -> +0x08 -> {inv_offset}
+        constexpr uint32_t INV_CHAIN_0    = 0xB8;
+        constexpr uint32_t INV_CHAIN_1    = 0x18;
+        constexpr uint32_t INV_CHAIN_2    = 0x08;
+        constexpr uint32_t INV_USED_SLOTS = 0x12;   // uint16
+        constexpr uint32_t INV_TOTAL_SLOTS= 0x14;   // uint16
+        constexpr uint32_t INV_BONUS_SLOTS= 0x16;   // uint16
+    }
+
     namespace Player {
         // These are resolved at runtime from the player actor.
         // The stat entry is found by scanning the stat component (base+0x58 array).
@@ -324,6 +374,42 @@ namespace signatures {
     // --- MapInsert (from EquipHide) ---
     constexpr const char* MAP_INSERT_P1 =
         "4C 89 4C 24 20 53 55 56 57 41 54 41 55 48 83 EC 28 44 8B 11 48 8B D9 4D 8B E1 41 8B F0 4C 8B EA";
+
+    // --- Player Base Discovery (from bbfox0703 CT, game v1.01.03) ---
+    // RIP-relative pointer resolution to find the Player static base dynamically
+    // This is more robust than hardcoding the static address (0x5CC7618)
+    constexpr const char* PLAYER_BASE_DISCOVERY =
+        "48 8B 0D ? ? ? ? E8 ? ? ? ? 41 B0 01 48 8B 53 08 48 8D 4C 24 40";
+    constexpr int PLAYER_BASE_DISCOVERY_RIP_OFFSET = 3;
+    constexpr int PLAYER_BASE_DISCOVERY_RIP_END = 7;
+
+    // --- Item Highlight / Private Storage (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+1AA8DC7: cmp qword ptr [rbx+10],00
+    // rsi=7 for storage view, rsi=1 for inventory view, r10=item struct
+    constexpr const char* ITEM_HIGHLIGHT =
+        "49 83 7A 10 00 7E 37";
+
+    // --- Contest Score (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+C3F21E: mov rax,[rbx+68]
+    // rbx = contest data struct, score chain: +0x68 -> +0x20 -> +0x388 -> +0x64
+    constexpr const char* CONTEST_SCORE =
+        "48 8B 43 68 48 8B 48 20 48 8B 81";
+
+    // --- Contribution Gain (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+1B38EC1: mov r12,[r8+10]
+    // r8 = contribution entry, +0x0C = current value, +0x08 = secondary, +0x10 = data ptr
+    constexpr const char* CONTRIBUTION_GAIN =
+        "4D 8B 60 10 89 45 C0";
+
+    // --- Inventory Slot Read (from bbfox0703 CT, game v1.01.03) ---
+    // Reads total slots (+0x14) and used slots (+0x12) as signed 16-bit
+    constexpr const char* INVENTORY_SLOT_READ =
+        "0F BF 48 14 0F BF 40 12 2B C8 41";
+
+    // --- Max Slot Add (from bbfox0703 CT, game v1.01.03) ---
+    // Adds bonus slots at [rbx+0x16]: add [rbx+16],di
+    constexpr const char* MAX_SLOT_ADD =
+        "66 01 7B 16 48 8B C6";
 
     // --- Camera Zoom/FOV Write (from Send's CE table, game v1.00.03) ---
     // Instruction: movss [r12+0xD8], xmm0 (writes zoom/FOV to camera struct)

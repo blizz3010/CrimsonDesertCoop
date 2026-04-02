@@ -194,6 +194,43 @@ player_core -> +0xA0 -> cache_block
 - `CrimsonDesert.exe+05EDB400`
 - `CrimsonDesert.exe+05C008A0`
 
+### Static Player Base Pointer (from bbfox0703 CT, v1.01.03)
+```
+Player = CrimsonDesert.exe+5CC7618
+```
+Discovery AOB (RIP-relative): `48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B0 01 48 8B 53 08 48 8D 4C 24 40`
+
+### Character Pointer Chains (from bbfox0703 CT, v1.01.03)
+All characters share a common chain prefix:
+```
+[Player+0x18] → +0xA0 → +0xD0 → {character_slot} → +0x20 → +0x18 → +0x58 → {stat}
+```
+
+Character slot offsets (point of divergence):
+| Character | Slot Offset | Role |
+|-----------|-------------|------|
+| Kliff     | **0x68**    | Main player character |
+| Oongka    | **0xE0**    | Companion |
+| Damiane   | **0x168**   | Companion |
+
+Stat offsets within the stats component (+0x58):
+| Stat | Offset | Type |
+|------|--------|------|
+| Health | **+0x08** | 4-byte int (displayed * 1000) |
+| Stamina | **+0x488** | 4-byte int |
+| Spirit | **+0x518** | 4-byte int |
+
+### Inventory Structure (from bbfox0703 CT, v1.01.03)
+Chain from character slot: `→ +0xB8 → +0x18 → +0x08 → {offset}`
+| Field | Offset | Type |
+|-------|--------|------|
+| Used Slots | +0x12 | uint16 |
+| Total Slots | +0x14 | uint16 |
+| Bonus Slots | +0x16 | uint16 |
+
+Item highlight read AOB: `0F BF 48 14 0F BF 40 12 2B C8 41`
+Max slot write AOB: `66 01 7B 16 48 8B C6`
+
 ### Key Signatures (IDA-style, ? = wildcard)
 See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list.
 

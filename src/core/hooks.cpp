@@ -53,6 +53,12 @@ bool HookManager::initialize() {
     // This gives us access to the actor manager and player actor
     resolve_world_system();
 
+    // --- Player base pointer resolution (from bbfox0703 CT, v1.01.03) ---
+    // Additional fallback: resolve the player static base via RIP-relative sig
+    if (!get_runtime_offsets().player_resolved) {
+        resolve_player_base();
+    }
+
     // --- Player position hook ---
     // From player-status-modifier: hooks the position height access function
     // At hook point: r13 = float* position array [X, Y, Z]
@@ -235,6 +241,61 @@ bool HookManager::resolve_player_actor() {
     rt.player_resolved = true;
     spdlog::info("Player actor resolved at 0x{:X}", player);
     return true;
+}
+
+bool HookManager::resolve_player_base() {
+    auto& rt = get_runtime_offsets();
+
+    // Method 1: Signature-based RIP-relative resolution (from bbfox0703 CT)
+    auto result = sig_scan(signatures::PLAYER_BASE_DISCOVERY, "PlayerBaseDiscovery");
+    if (result) {
+        uintptr_t rip_addr = result.address + signatures::PLAYER_BASE_DISCOVERY_RIP_OFFSET;
+        uintptr_t player_base_storage = MemoryScanner::follow_rel32(rip_addr, 0);
+
+        if (is_valid_ptr(player_base_storage)) {
+            uintptr_t player_base = *reinterpret_cast<uintptr_t*>(player_base_storage);
+            if (is_valid_ptr(player_base)) {
+                // Follow the chain to find the player actor:
+                // base -> +0x18 -> +0xA0 -> +0xD0 -> +0x68 (Kliff)
+                uintptr_t actor = resolve_ptr_chain(player_base, {
+                    offsets::PlayerBase::CHAIN_0,
+                    offsets::PlayerBase::CHAIN_1,
+                    offsets::PlayerBase::CHAIN_2,
+                    offsets::PlayerBase::SLOT_KLIFF
+                });
+
+                if (is_valid_ptr(actor)) {
+                    rt.player_actor_ptr = actor;
+                    rt.player_resolved = true;
+                    spdlog::info("Player resolved via PlayerBaseDiscovery sig at 0x{:X}", actor);
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Method 2: Hardcoded static base (last resort, v1.01.03)
+    uintptr_t static_base = game_base_ + offsets::PlayerBase::STATIC_RVA;
+    uintptr_t player_base = *reinterpret_cast<uintptr_t*>(static_base);
+    if (is_valid_ptr(player_base)) {
+        uintptr_t actor = resolve_ptr_chain(player_base, {
+            offsets::PlayerBase::CHAIN_0,
+            offsets::PlayerBase::CHAIN_1,
+            offsets::PlayerBase::CHAIN_2,
+            offsets::PlayerBase::SLOT_KLIFF
+        });
+
+        if (is_valid_ptr(actor)) {
+            rt.player_actor_ptr = actor;
+            rt.player_resolved = true;
+            spdlog::info("Player resolved via static base (0x{:X}) at 0x{:X}",
+                         offsets::PlayerBase::STATIC_RVA, actor);
+            return true;
+        }
+    }
+
+    spdlog::warn("Failed to resolve player via PlayerBase methods");
+    return false;
 }
 
 // =========================================================================
