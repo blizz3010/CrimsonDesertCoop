@@ -316,6 +316,44 @@ movss [r12+0xD8], xmm0    ; F3 41 0F 11 84 24 D8 00 00 00
 - [FearLess CE Thread](https://fearlessrevolution.com/viewtopic.php?t=38679) - Community cheat tables, pointer research
 - [FearLess CE Trust/FOV/Contribution](https://fearlessrevolution.com/viewtopic.php?t=38691) - Camera FOV, contribution, trust offsets by Send
 
+## New Leads from Community Research (April 2026)
+
+The following leads were identified during a research session and may contain new offsets we haven't integrated yet:
+
+### Save Editor Data (NattKh/CRIMSON-DESERT-SAVE-EDITOR)
+The save editor has reverse-engineered significant game data:
+- **2,262 item templates** with full stat breakdowns (damage, defense, speed, crit, resistances)
+- **633 quests and 5,450 missions** with localized names - useful for quest sync offset cross-referencing
+- **189 abyss gems** across 30+ categories
+- **5,500+ knowledge entries** including fast travel unlocks, recipes, map reveals
+- **Save format**: PARC binary serialization, ChaCha20 encrypted, LZ4 HC compressed
+- **Mount/vehicle respawn timers** are editable - suggests a vehicle manager struct exists in memory
+
+### Mount/Horse System (FearLess CE Community)
+- Horse HP and Stamina pointers exist but **only resolve while mounted**
+- Changing horse requires game restart for pointer re-resolution
+- Health Regen cheat now covers Health/Stamina/Mount Regen (all mount types including dragons)
+- Dragon HP may be stored as float (not 4-byte int) - community struggled to find it with standard int scan
+- **Action needed**: Scan for float values while on dragon, or trace the mount entity from the player actor
+
+### Camera System (CDCamera Mod)
+- The CDCamera mod modifies distance, height, FOV, steadycam, centered framing, and combat zoom
+- These are PAZ-based patches (modifying game config files, not memory hooks)
+- The camera struct base is captured via r12 in our zoom hook
+- **Action needed**: Map fields beyond +0xD8 (zoom). Try ReClass on the r12 pointer to find position, rotation, target, and interpolation fields
+
+### Inventory Expander (maxlehot1234)
+- Uses dynamic signature scanning against 0.paz at runtime
+- Survives game patches because it doesn't hardcode file offsets
+- **Action needed**: Review their sig patterns for inventory-related structures we might be missing
+
+### Gameplay Rebalance Mod (Nexus Mods #435)
+- INI-configurable gameplay rebalance - may expose additional stat/combat offsets through its config
+
+### AutoLoot Table (Nexus Mods #93)
+- Cheat Engine table for auto-looting
+- **Action needed**: Download and inspect for loot/pickup system offsets
+
 ## Game Version Tracking
 
 Offsets WILL change with game patches. Maintain a version table:
