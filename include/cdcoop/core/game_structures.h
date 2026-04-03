@@ -455,6 +455,47 @@ namespace signatures {
         "49 01 4C 38 10";
     constexpr int ITEM_GAIN_PRIMARY_OFFSET = 0;
 
+    // --- Durability Write (from Orcax player-status-modifier, v1.01.03) ---
+    // Hook: rbx = durability entry, rbx+0x50 = current durability (uint16), rdi = new value
+    constexpr const char* DURABILITY_WRITE_PRIMARY =
+        "66 3B CF 66 0F 4C F9 66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20";
+    constexpr int DURABILITY_WRITE_PRIMARY_OFFSET = 7;
+
+    constexpr const char* DURABILITY_WRITE_FALLBACK =
+        "66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20";
+    constexpr int DURABILITY_WRITE_FALLBACK_OFFSET = 0;
+
+    // --- Durability Delta (from Orcax player-status-modifier, v1.01.03) ---
+    // Hook: rbp = durability entry, rax = current (uint16), r13 = delta (int16)
+    constexpr const char* DURABILITY_DELTA_PRIMARY =
+        "0F B7 C7 66 41 03 C5 66 89 45 38 79 0B 33 C0 66 89 45 38 0F B7 C8";
+    constexpr int DURABILITY_DELTA_PRIMARY_OFFSET = 3;
+
+    constexpr const char* DURABILITY_DELTA_FALLBACK =
+        "66 41 03 C5 66 89 45 38 79 0B 33 C0 66 89 45 38";
+    constexpr int DURABILITY_DELTA_FALLBACK_OFFSET = 0;
+
+    // --- Abyss Durability Delta (from Orcax player-status-modifier, v1.01.03) ---
+    // Hook: rbx = abyss entry, rsi = current (uint16), r13 = delta (int16)
+    constexpr const char* ABYSS_DURABILITY_PRIMARY =
+        "0F B7 73 02 48 8B CB 66 41 3B F5 42 8D 04 2E 66 0F 4D F8 66 89 7B 02 E8";
+    constexpr int ABYSS_DURABILITY_PRIMARY_OFFSET = 11;
+
+    constexpr const char* ABYSS_DURABILITY_FALLBACK =
+        "66 41 3B F5 42 8D 04 2E 66 0F 4D F8 66 89 7B 02";
+    constexpr int ABYSS_DURABILITY_FALLBACK_OFFSET = 4;
+
+    // --- Combat State Flag (from JustSkip mod, user-configurable) ---
+    // RIP-relative pointer to combat flag byte.
+    // Resolves via: scan -> match+offset -> read 4-byte RIP displacement -> resolve addr
+    // Combat flag is at resolved_ptr + 0x1A (byte: 1 = in combat, 0 = not)
+    // Pattern from JustSkip INI default (community-sourced):
+    constexpr const char* COMBAT_FLAG_PATTERN =
+        "48 8B 05 ? ? ? ? 80 78 1A 01";
+    constexpr int COMBAT_FLAG_RIP_OFFSET = 3;   // RIP-relative displacement starts at byte 3
+    constexpr int COMBAT_FLAG_RIP_END = 7;       // displacement is 4 bytes (3+4=7)
+    constexpr uint32_t COMBAT_FLAG_BYTE = 0x1A;  // offset within resolved struct
+
     // --- WorldSystem Resolution (from EquipHide) ---
     // Resolves the WorldSystem singleton via RIP-relative addressing
     constexpr const char* WORLD_SYSTEM_P1 =

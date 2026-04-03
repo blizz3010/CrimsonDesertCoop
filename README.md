@@ -205,13 +205,16 @@ These pages are blocked from automated access (403/auth-gated). **If you can acc
 - **Reputation System** - Gain setter at +1B4C98E, no-decrease at +1B4C971, current at [rax+0x08], min at [rax+0x04] (from bbfox0703 CT, newly integrated)
 - **Friendship System** - Fast friendship injection at +14F639E, value at [rax+0x10] (from bbfox0703 CT, newly integrated)
 - **Horse HP Capture** - Dynamic HP capture via hook steps at +12D78BA / +12D09BE, uses same StatEntry format as player (from bbfox0703 CT, newly integrated - mount must be active)
+- **Combat State Flag** - RIP-relative AOB `48 8B 05 ?? ?? ?? ?? 80 78 1A 01`, combat byte at resolved_ptr+0x1A (from [JustSkip](https://github.com/wealdly/JustSkip) source, newly integrated)
+- **Durability System** - Write, delta, and abyss durability AOBs with primary/fallback patterns (from [Orcax player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) source, newly integrated)
 - **DX12 Present** - Hook for ImGui overlay and frame tick (implemented)
 - **Steam P2P** - ISteamNetworkingSockets with reliable/unreliable channels (implemented)
-- **35+ AOB Signatures** - With primary/fallback patterns from community mods (expanded April 2026)
+- **40+ AOB Signatures** - With primary/fallback patterns from community mods (expanded April 2026)
 
 ### Related Projects & Offset Sources
 
-- [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage signatures (ASI mod, safetyhook)
+- [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage, durability signatures (ASI mod, safetyhook, updated March 2026)
+- [JustSkip](https://github.com/wealdly/JustSkip) - Game speed control ASI with **combat state flag AOB** and generic `ScanSignature()` + RIP-relative resolver (open source, MinHook)
 - [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework used by CD mods
 - [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpacker) - PAZ archive extraction tool
