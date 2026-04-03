@@ -20,6 +20,15 @@ namespace cdcoop {
 //   - Tuuuup! (FearLess Revolution) - ServerActor, ATK/DEF, max stats, base supply, item struct
 //
 // Game version: v1.01.03 / Table v1.0.6 (March 2026)
+//
+// New offsets (April 2026 research):
+//   - bbfox0703 CT v1.0.6: reputation system (set/no-dec), HP capture (player+horse),
+//     item management AOBs, bag bonus, friendship, resistant attrs (pending extraction)
+//   - FearLess community pages 14-16: horse HP confirmed as dynamic capture,
+//     dragon HP unresolved (may be float), mount pointer requires active riding
+//   - PA class names from CT: pa::ClientActorManager, pa::ClientChildOnlyInGameActor,
+//     pa::ServerChildOnlyInGameActor, pa::ClientInventoryActorComponent,
+//     pa::ClientStatusActorComponent, pa::ServerUserActor
 
 struct Vec3 {
     float x, y, z;
@@ -299,6 +308,63 @@ namespace offsets {
         constexpr uint32_t FLAG           = 0x104;  // byte - 1=true/server, 0=visual/client
     }
 
+    // =========================================================================
+    // Reputation system (from bbfox0703 CT, game v1.01.03)
+    // Injection points:
+    //   CrimsonDesert.exe+1B4C98E  (set min rep when gain)
+    //   CrimsonDesert.exe+1B4C971  (reputation no decrease)
+    // At hook: rax = reputation data struct
+    // =========================================================================
+    namespace Reputation {
+        constexpr uint32_t SET_MIN_RVA    = 0x1B4C98E; // Injection: reputation gain setter
+        constexpr uint32_t NO_DEC_RVA     = 0x1B4C971; // Injection: reputation decrease handler
+        constexpr uint32_t CURRENT        = 0x08;      // [rax+0x08] int32 - current reputation value
+        constexpr uint32_t MINIMUM        = 0x04;      // [rax+0x04] int32 - reputation floor
+        constexpr uint32_t DELTA          = 0x0C;      // [rax+0x0C] int32 - reputation change delta
+        constexpr uint32_t DATA_PTR       = 0x10;      // [rax+0x10] ptr   - reputation data pointer
+    }
+
+    // =========================================================================
+    // Horse / Mount system (from bbfox0703 + FearLess community)
+    // Horse HP is captured dynamically via the same HP hook (step 1/2).
+    // The horse HP address is stored in i_base_hp_addr_1_2 in the CT.
+    // IMPORTANT: Horse pointer only resolves while mounted.
+    //            Changing horse requires game restart for pointer refresh.
+    //            Horse HP/Stamina may be float type (community reports vary).
+    // =========================================================================
+    namespace Mount {
+        // Horse stats use the same StatEntry structure as player,
+        // resolved through a parallel capture path in the HP hook.
+        // No static pointer chain available - must be captured at runtime
+        // when the player mounts. The CT captures it as a secondary
+        // address during the HP AOB scan (step 1 at +12D78BA, step 2 at +12D09BE).
+        constexpr uint32_t HP_HOOK_STEP1_RVA = 0x12D78BA; // HP address capture step 1
+        constexpr uint32_t HP_HOOK_STEP2_RVA = 0x12D09BE; // HP address capture step 2
+
+        // Once captured, horse stats use same offsets as player stats:
+        // health at +0x08, stamina at +0x488, spirit at +0x518
+        // (relative to the captured mount stats component base)
+
+        // Dragon mount HP is reportedly difficult to find - community
+        // reports it may not use standard StatEntry format, or may use
+        // a different data type (float vs int). Status: UNRESOLVED.
+    }
+
+    // =========================================================================
+    // Resistance attributes (from bbfox0703 CT feature #24 "Get resistant attrs")
+    // The CT includes a feature to locate resistance attributes, but the
+    // exact struct layout and offsets are embedded in CT script logic.
+    // Status: Feature exists in CT but offsets need extraction from the
+    //         CT's Lua scripts. Likely accessed via actor stats component.
+    // =========================================================================
+    namespace ResistanceAttrs {
+        // TODO: Extract exact offsets from bbfox0703 CT Lua scripts
+        // The resistance system likely uses the same stats component base
+        // (actor + 0x58) with resistance entries at higher offsets.
+        // Placeholder - needs verification with ReClass.NET or CE:
+        constexpr uint32_t PLACEHOLDER    = 0x00;  // Needs extraction from CT
+    }
+
     namespace Enemy {
         // Enemies use the same actor base. Stats use the same StatEntry format.
         constexpr uint32_t AGGRO_TARGET   = 0x150;  // ptr - current aggro target actor
@@ -388,6 +454,47 @@ namespace signatures {
     constexpr const char* ITEM_GAIN_PRIMARY =
         "49 01 4C 38 10";
     constexpr int ITEM_GAIN_PRIMARY_OFFSET = 0;
+
+    // --- Durability Write (from Orcax player-status-modifier, v1.01.03) ---
+    // Hook: rbx = durability entry, rbx+0x50 = current durability (uint16), rdi = new value
+    constexpr const char* DURABILITY_WRITE_PRIMARY =
+        "66 3B CF 66 0F 4C F9 66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20";
+    constexpr int DURABILITY_WRITE_PRIMARY_OFFSET = 7;
+
+    constexpr const char* DURABILITY_WRITE_FALLBACK =
+        "66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20";
+    constexpr int DURABILITY_WRITE_FALLBACK_OFFSET = 0;
+
+    // --- Durability Delta (from Orcax player-status-modifier, v1.01.03) ---
+    // Hook: rbp = durability entry, rax = current (uint16), r13 = delta (int16)
+    constexpr const char* DURABILITY_DELTA_PRIMARY =
+        "0F B7 C7 66 41 03 C5 66 89 45 38 79 0B 33 C0 66 89 45 38 0F B7 C8";
+    constexpr int DURABILITY_DELTA_PRIMARY_OFFSET = 3;
+
+    constexpr const char* DURABILITY_DELTA_FALLBACK =
+        "66 41 03 C5 66 89 45 38 79 0B 33 C0 66 89 45 38";
+    constexpr int DURABILITY_DELTA_FALLBACK_OFFSET = 0;
+
+    // --- Abyss Durability Delta (from Orcax player-status-modifier, v1.01.03) ---
+    // Hook: rbx = abyss entry, rsi = current (uint16), r13 = delta (int16)
+    constexpr const char* ABYSS_DURABILITY_PRIMARY =
+        "0F B7 73 02 48 8B CB 66 41 3B F5 42 8D 04 2E 66 0F 4D F8 66 89 7B 02 E8";
+    constexpr int ABYSS_DURABILITY_PRIMARY_OFFSET = 11;
+
+    constexpr const char* ABYSS_DURABILITY_FALLBACK =
+        "66 41 3B F5 42 8D 04 2E 66 0F 4D F8 66 89 7B 02";
+    constexpr int ABYSS_DURABILITY_FALLBACK_OFFSET = 4;
+
+    // --- Combat State Flag (from JustSkip mod, user-configurable) ---
+    // RIP-relative pointer to combat flag byte.
+    // Resolves via: scan -> match+offset -> read 4-byte RIP displacement -> resolve addr
+    // Combat flag is at resolved_ptr + 0x1A (byte: 1 = in combat, 0 = not)
+    // Pattern from JustSkip INI default (community-sourced):
+    constexpr const char* COMBAT_FLAG_PATTERN =
+        "48 8B 05 ? ? ? ? 80 78 1A 01";
+    constexpr int COMBAT_FLAG_RIP_OFFSET = 3;   // RIP-relative displacement starts at byte 3
+    constexpr int COMBAT_FLAG_RIP_END = 7;       // displacement is 4 bytes (3+4=7)
+    constexpr uint32_t COMBAT_FLAG_BYTE = 0x1A;  // offset within resolved struct
 
     // --- WorldSystem Resolution (from EquipHide) ---
     // Resolves the WorldSystem singleton via RIP-relative addressing
@@ -494,6 +601,29 @@ namespace signatures {
     // Adds bonus slots at [rbx+0x16]: add [rbx+16],di
     constexpr const char* MAX_SLOT_ADD =
         "66 01 7B 16 48 8B C6";
+
+    // --- Reputation Gain Setter (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+1B4C98E: mov [rax+10], ... ; mov [rax+0C], ...
+    // rax = reputation data struct, +0x08 = current, +0x04 = minimum, +0x0C = delta
+    constexpr const char* REPUTATION_SET_MIN =
+        "?? 89 ?? 10 89 ?? 0C ?? 8B ?? 24 ?? 00 00 00";
+
+    // --- Reputation No-Decrease (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+1B4C971: call ...; test ...; jz ...; mov [rax+08]
+    constexpr const char* REPUTATION_NO_DEC =
+        "E8 ?? ?? ?? ?? ?? 85 ?? 74 ?? 89 ?? 08 39 ?? 04 7D";
+
+    // --- HP Address Capture Step 1 (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+12D78BA
+    // Captures both player HP base and horse HP base as secondary
+    constexpr const char* HP_CAPTURE_STEP1 =
+        "0F 85 ?? ?? ?? ?? ?? 8B ?? 38 ?? 3B ?? 0F 86";
+
+    // --- HP Address Capture Step 2 (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+12D09BE
+    // Completes HP address resolution for both player and mount
+    constexpr const char* HP_CAPTURE_STEP2 =
+        "?? 8B ?? 08 ?? 0F B7 ?? ?? 8B ?? E8 ?? ?? ?? ?? ?? 85";
 
     // --- Camera Zoom/FOV Write (from Send's CE table, game v1.00.03) ---
     // Instruction: movss [r12+0xD8], xmm0 (writes zoom/FOV to camera struct)
