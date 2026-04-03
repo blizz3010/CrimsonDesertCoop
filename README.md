@@ -155,32 +155,35 @@ These are the remaining offsets/systems needed to bring the mod to completion. *
 | # | Priority | System | What We Need | Status | Where to Look |
 |---|----------|--------|--------------|--------|---------------|
 | 1 | **HIGH** | Animation State | Verify offsets 0x120 (anim ID) and 0x124 (blend weight) on actor base with ReClass.NET | Estimated - needs verification | Attach ReClass to actor base, trigger animations, watch for changing uint32/float |
-| 2 | **HIGH** | Animation IDs | Extract real animation ID table from PAZ archives (current IDs 1000-3005 are placeholders) | Placeholder - **blocking accurate anim sync** | Use [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpacker) to extract animation config XMLs from PAZ files |
+| 2 | **HIGH** | Animation IDs | Extract real animation ID table from PAZ archives (current IDs 1000-3005 are placeholders) | Placeholder - **blocking accurate anim sync** | Use [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpacker) to extract animation config XMLs. [CrimsonForge](https://www.nexusmods.com/crimsondesert/mods/446) can extract Havok .hkx with bone names, skeleton hierarchy, and animation type info. Filter with `--filter "*.xml"` for animation configs |
 | 3 | **HIGH** | Combat Flags | Verify 0x130 (isAttacking) and 0x131 (isDodging) bool offsets on actor base | Estimated - needs verification | ReClass.NET: watch bytes at actor+0x130 region while attacking/dodging |
-| 4 | **MEDIUM** | Quest Manager | Find quest manager pointer within WorldSystem or a nearby singleton | Not started | WorldSystem (+0x30 = ActorManager) likely has sibling pointers to other managers. The [SWISS Knife Save Editor](https://www.nexusmods.com/crimsondesert/mods/20) has a database of 633 quests / 5,450 missions - cross-reference with memory |
-| 5 | **MEDIUM** | Cutscene Manager | Find the function/manager that triggers cutscenes | Not started | Set breakpoint on known cutscene entry, trace call stack to find manager singleton. Cutscene data may be in PAZ archives |
-| 6 | **MEDIUM** | Camera State (full) | Map complete camera struct beyond zoom (+0xD8). Need position, rotation, target, interpolation fields | Partial - zoom only | Camera struct base captured via r12 in zoom hook. The [CDCamera mod](https://www.nexusmods.com/crimsondesert/mods/65) modifies camera extensively - study its PAZ patches for field layout |
-| 7 | **MEDIUM** | Mount/Vehicle System | Mount (horse/dragon) health, stamina, and control offsets | Not started | FearLess CE thread has horse HP/stamina pointers (must be mounted for pointer to resolve). Dragon HP reported hard to find - may be float not int. [FearLess thread](https://fearlessrevolution.com/viewtopic.php?t=38679) page 8+ |
-| 8 | **LOW** | Player Rotation | Verify rotation quaternion at position_struct + 0xA0 (estimated from BlackSpace layout) | Estimated | ReClass.NET: navigate to position_struct, look for float4 after position at +0x90. Rotate character and watch for changing values |
-| 9 | **LOW** | World Object Manager | Find manager for doors, chests, interactive world objects | Not started | MapLookup/MapInsert sigs exist from EquipHide work but exact manager layout unknown. May be accessible from WorldSystem sibling pointers |
-| 10 | **LOW** | Teleport/Fast Travel System | Hook fast travel to sync both players to same destination | Not started | The [Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) can inject 5,500+ knowledge entries including fast travel unlocks - may hint at data structure |
+| 4 | **HIGH** | Resistance Attributes | Extract resistance attribute offsets from bbfox0703 CT Lua scripts (feature #24 "Get resistant attrs") | **CT has feature** - offsets need extraction | Download [bbfox0703 CT](https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables/blob/main/Crimson%20Desert/CrimsonDesert.CT), open in CE 7.5+, inspect "Get resistant attrs" script. Likely in stats component (actor+0x58) at higher offsets |
+| 5 | **MEDIUM** | Quest Manager | Find quest manager pointer within WorldSystem or a nearby singleton | Not started | WorldSystem (+0x30 = ActorManager) likely has sibling pointers to other managers. [NattKh Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) has quest inject via PARC insert with 63,000+ validated offsets. SWISS Knife has 633 quests / 5,450 missions |
+| 6 | **MEDIUM** | Cutscene Manager | Find the function/manager that triggers cutscenes | Not started | Set breakpoint on known cutscene entry, trace call stack. JustSkip mod (ASI) skips cutscenes natively - study its hook point for the cutscene trigger function |
+| 7 | **MEDIUM** | Camera State (full) | Map complete camera struct beyond zoom (+0xD8). Need position, rotation, target, interpolation fields | Partial - zoom only | [UltimateCameraMod](https://github.com/FitzDegenhub/UltimateCameraMod) has 150+ camera states in `playercamerapreset.xml`. Extract via PAZ unpacker with `--filter "*.xml"`. [CDCamera mod](https://www.nexusmods.com/crimsondesert/mods/65) PAZ patches have field layout |
+| 8 | **MEDIUM** | Mount HP (Horse) | Horse health/stamina captured dynamically via HP hook. Need to implement runtime capture | **Partially resolved** - AOB exists | bbfox0703 CT captures horse HP via HP hook steps (injection at +12D78BA / +12D09BE). **Pointer only resolves while mounted**; changing horse requires restart. Uses same StatEntry format as player once captured |
+| 9 | **MEDIUM** | Mount HP (Dragon) | Dragon mount health, stamina, and flight timer offsets | **Unresolved** - community stuck | FearLess pages 14-16: dragon HP hard to find. May be float not int4. Community tried 4-byte, float, ALL value types without success. Separate entity pool from ground mounts? |
+| 10 | **LOW** | Player Rotation | Verify rotation quaternion at position_struct + 0xA0 (estimated from BlackSpace layout) | Estimated | ReClass.NET: navigate to position_struct, look for float4 after position at +0x90. Rotate character and watch for changing values |
+| 11 | **LOW** | World Object Manager | Find manager for doors, chests, interactive world objects | Not started | MapLookup/MapInsert sigs exist from EquipHide work but exact manager layout unknown. May be accessible from WorldSystem sibling pointers |
+| 12 | **LOW** | Teleport/Fast Travel System | Hook fast travel to sync both players to same destination | Not started | [Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) can inject 5,500+ knowledge entries including fast travel unlocks - may hint at data structure |
 
-### Resources You Can Help With (I Can't Access These Directly)
+### Resources You Can Help With (Bot-Protected / Auth-Gated)
 
-These are pages/tools I found during research but can't scrape due to auth/bot protection. **If you can access them, the offset data inside would be extremely valuable:**
+These pages are blocked from automated access (403/auth-gated). **If you can access them manually, the offset data inside would be extremely valuable:**
 
-| Resource | URL | What It Likely Contains |
-|----------|-----|------------------------|
-| FearLess CE Thread (main, 16+ pages) | [fearlessrevolution.com/viewtopic.php?t=38679](https://fearlessrevolution.com/viewtopic.php?t=38679) | Latest pointer chains, mount offsets, new scripts from community. Pages 8-16 have recent posts about mount HP, dragon values, contribution, and possibly quest/cutscene leads |
-| FearLess CE Thread (secondary, bbfox) | [fearlessrevolution.com/viewtopic.php?t=38655](https://fearlessrevolution.com/viewtopic.php?t=38655) | BBFox's original offset research - real player address for inventory and stats |
-| Nexus Mods Cheat Table v1.0.6 (.CT file) | [nexusmods.com/crimsondesert/mods/64](https://www.nexusmods.com/crimsondesert/mods/64) | Download the .CT file and open in Cheat Engine - contains pointer chains for party data and currency. May have new offsets we haven't integrated |
-| Nexus Mods Modding Guide | [nexusmods.com/crimsondesert/mods/366](https://www.nexusmods.com/crimsondesert/mods/366) | Community modding guide - may document BlackSpace engine internals |
-| CDCamera source/patches | [nexusmods.com/crimsondesert/mods/65](https://www.nexusmods.com/crimsondesert/mods/65) | Camera overhaul mod - its PAZ patches likely contain camera struct field mappings (distance, height, FOV, steadycam) |
-| AutoLoot Cheat Table | [nexusmods.com/crimsondesert/mods/93](https://www.nexusmods.com/crimsondesert/mods/93) | AutoLoot CE table - may contain item pickup / loot system offsets we don't have |
-| Crimson Desert Forge | [nexusmods.com/crimsondesert/mods/446](https://www.nexusmods.com/crimsondesert/mods/446) | Modding toolkit - could have engine structure documentation |
-| FLiNG Trainer (latest) | [flingtrainer.com/trainer/crimson-desert-trainer/](https://flingtrainer.com/trainer/crimson-desert-trainer/) | Updated March 30, 2026 - 10 options. Trainers often use different offset paths than CE tables |
-| ResHax PAZ/PAMT Discussion | [reshax.com/topic/18908](https://reshax.com/topic/18908-need-help-extracting-paz-pamt-files-from-crimson-desert-blackspace-engine/) | PAZ/PAMT extraction discussion - may have animation file format details needed for animation ID extraction |
-| WeMod Trainer | [wemod.com/cheats/crimson-desert-trainers](https://www.wemod.com/cheats/crimson-desert-trainers) | 10 cheats including defense editing - may use unique offset paths |
+| Resource | URL | What It Likely Contains | Priority |
+|----------|-----|------------------------|----------|
+| FearLess CE Thread (main, 16+ pages) | [fearlessrevolution.com/viewtopic.php?t=38679](https://fearlessrevolution.com/viewtopic.php?t=38679) | **Pages 14-16 have dragon HP discussion**, mount pointers, new scripts. Horse HP confirmed, dragon HP still elusive | **HIGH** |
+| FearLess CE Thread (secondary, bbfox) | [fearlessrevolution.com/viewtopic.php?t=38655](https://fearlessrevolution.com/viewtopic.php?t=38655) | BBFox's original offset research - real player address for inventory and stats | MEDIUM |
+| Nexus Mods Cheat Table v1.0.6 (.CT file) | [nexusmods.com/crimsondesert/mods/64](https://www.nexusmods.com/crimsondesert/mods/64) | Download .CT and open in CE - we've partially extracted from [GitHub mirror](https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables) but Nexus version may have newer pointer chains | MEDIUM |
+| Nexus Mods Modding Guide v4.0 | [nexusmods.com/crimsondesert/mods/366](https://www.nexusmods.com/crimsondesert/mods/366) | Updated April 2026 for JSON Mod Manager V9. May document BlackSpace engine internals | MEDIUM |
+| CDCamera source/patches | [nexusmods.com/crimsondesert/mods/65](https://www.nexusmods.com/crimsondesert/mods/65) | Camera overhaul PAZ patches - field mappings for camera struct (distance, height, FOV, steadycam) | MEDIUM |
+| OpenCheatTables Thread | [opencheattables.com/viewtopic.php?p=4863](https://opencheattables.com/viewtopic.php?p=4863) | Alternative CE community - may have different pointer paths or dragon HP progress | MEDIUM |
+| AutoLoot Cheat Table | [nexusmods.com/crimsondesert/mods/93](https://www.nexusmods.com/crimsondesert/mods/93) | AutoLoot CE table - item pickup / loot system offsets | LOW |
+| Crimson Desert Forge | [nexusmods.com/crimsondesert/mods/446](https://www.nexusmods.com/crimsondesert/mods/446) | PAZ round-trip tool. Can extract Havok .hkx (skeleton/animation) but no RE docs found | LOW |
+| FLiNG Trainer (latest) | [flingtrainer.com/trainer/crimson-desert-trainer/](https://flingtrainer.com/trainer/crimson-desert-trainer/) | Updated March 30, 2026 - 10 options. May use different offset paths than CE tables | LOW |
+| ResHax PAZ/PAMT Discussion | [reshax.com/topic/18908](https://reshax.com/topic/18908-need-help-extracting-paz-pamt-files-from-crimson-desert-blackspace-engine/) | PAZ/PAMT extraction details - animation file format info needed for animation ID extraction | LOW |
+| WeMod Trainer | [wemod.com/cheats/crimson-desert-trainers](https://www.wemod.com/cheats/crimson-desert-trainers) | 10 cheats including defense editing - may use unique offset paths | LOW |
 
 ### What's Already Done (Verified Offsets)
 
@@ -199,9 +202,12 @@ These are pages/tools I found during research but can't scrape due to auth/bot p
 - **Trust System** - Trust value at struct+0x10, gift and shop NPC write paths (verified)
 - **Item Count Decrease** - Instruction `49 29 4C 07 10` for preventing item loss (verified)
 - **Equipment Visibility** - Body->VisCtrl chain: +0x68->+0x40->+0xE8, PartInOutSocket at +0x1C (verified)
+- **Reputation System** - Gain setter at +1B4C98E, no-decrease at +1B4C971, current at [rax+0x08], min at [rax+0x04] (from bbfox0703 CT, newly integrated)
+- **Friendship System** - Fast friendship injection at +14F639E, value at [rax+0x10] (from bbfox0703 CT, newly integrated)
+- **Horse HP Capture** - Dynamic HP capture via hook steps at +12D78BA / +12D09BE, uses same StatEntry format as player (from bbfox0703 CT, newly integrated - mount must be active)
 - **DX12 Present** - Hook for ImGui overlay and frame tick (implemented)
 - **Steam P2P** - ISteamNetworkingSockets with reliable/unreliable channels (implemented)
-- **30+ AOB Signatures** - With primary/fallback patterns from community mods
+- **35+ AOB Signatures** - With primary/fallback patterns from community mods (expanded April 2026)
 
 ### Related Projects & Offset Sources
 
