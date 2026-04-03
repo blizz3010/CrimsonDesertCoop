@@ -318,7 +318,77 @@ movss [r12+0xD8], xmm0    ; F3 41 0F 11 84 24 D8 00 00 00
 
 ## New Leads from Community Research (April 2026)
 
-The following leads were identified during a research session and may contain new offsets we haven't integrated yet:
+The following leads were identified during a comprehensive research session and may contain new offsets we haven't integrated yet.
+
+### bbfox0703 Cheat Table (HIGHEST VALUE - Open Source CT with 220+ entries)
+**GitHub**: https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables/blob/main/Crimson%20Desert/CrimsonDesert.CT
+- This is the **most detailed open-source CT** available - full XML source with 220+ entries
+- **New offsets NOT yet in our codebase**:
+
+| Feature | Injection Address | Details |
+|---------|------------------|---------|
+| Fast Friendship | `CrimsonDesert.exe+14F639E` | Caps `[rax+10]` at `0x64` (100) |
+| Infinite Items | `CrimsonDesert.exe+1D3992A` | Item structure: ID at `+0x08`, qty at `+0x10`, flags at `+0x20` |
+| Item Decrease Filter | `CrimsonDesert.exe+1ABCA25` | Range clamp on subtraction |
+| Menu Item Amount | `CrimsonDesert.exe+F8DA43A` | Stack size thresholds |
+| Bag Bonus Multiplier | `CrimsonDesert.exe+1D39628` | SSE/SIMD multiplication at `+0x14`/`+0x16` |
+| Min Reputation Lock | `CrimsonDesert.exe+1B4C98E` | Rep struct: min at `+0x04`, current at `+0x08`, max at `+0x10` |
+| No Reputation Decrease | `CrimsonDesert.exe+1B4C971` | Increments rep if below `0xC8` (200) |
+| Weapon Durability | Entry ID 218 | No decrease |
+| Gear Durability | Entry IDs 206-207 | No decrease |
+
+- **Item ID mapping**: Arrows=#1, Silver=#1580, Abyss Cube=#2270, Materials=#800-950, Recipes=#1003-1305
+- **Action needed**: Clone this repo, parse the .CT XML, extract all pointer chains and injection addresses
+
+### Reputation System (NEW - not in our codebase)
+From bbfox0703 CT - we don't have reputation offsets yet:
+- Reputation min at struct `+0x04` (int32)
+- Reputation current at struct `+0x08` (int32)
+- Reputation max at struct `+0x10` (int32)
+- Write at `CrimsonDesert.exe+1B4C98E` / `CrimsonDesert.exe+1B4C971`
+- **Action needed**: Integrate reputation sync for co-op
+
+### Cheat Evolution Trainer (28 cheats - has teleport/coordinates!)
+**URL**: https://cheatevolution.com/crimson-desert-trainer/
+- Has **Save Coordinates** and **Teleport to Saved Coordinates** features
+- Also: movement speed multiplier, jump height multiplier, FOV edit, super movement speed, super jump
+- **Action needed**: Teleportation is solved by this trainer. Movement speed multiplier offset useful for tethering
+- **Accessibility**: Requires purchase/subscription
+
+### UltimateCameraMod (150+ camera states in XML!)
+**GitHub**: https://github.com/FitzDegenhub/UltimateCameraMod
+- Contains **150+ camera states** defined in `playercamerapreset.xml`
+- Full PAZ decrypt/repack pipeline
+- **Action needed**: Extract the camera preset XML - maps every camera field to specific parameters. Could solve our camera struct mapping entirely.
+
+### pycrimson Python Library (NEW - PAZ extraction tool)
+**GitHub**: https://github.com/LukeFZ/pycrimson
+- First public proper key derivation implementation for both asset and save files
+- PAZ/PAMT extraction, DDS decompression, save decrypt/re-encrypt, reflection-based deserializer
+- **Action needed**: Use this to programmatically extract animation data from PAZ archives (solving our animation ID problem)
+
+### PAZ Encryption Full Spec (from community RE)
+- PAMT index: filename, offset, comp_size, orig_size, flags
+- Compression flags (bits 16-19): 0=none, 2=LZ4, 3=proprietary, 4=zlib
+- ChaCha20 with Jenkins hashlittle key derivation (init `0xC5EDE`)
+- 32-byte key: 8 chunks of `(seed ^ 0x60616263) ^ delta[i]`
+- Delta table: `[0x00, 0x0A0A0A0A, 0x0C0C0C0C, 0x06060606, 0x0E0E0E0E, 0x0A0A0A0A, 0x06060606, 0x02020202]`
+
+### Nexus Mods Forum - Enemy HP Pointer Chain (NEW)
+**URL**: https://forums.nexusmods.com/topic/13533151-crimson-desert-progress-on-building-a-combat-overlay-enemy-hp-pointer-chain-needed/
+- Someone is actively researching entity pointer chains for a combat overlay
+- **Action needed**: Check this thread for enemy entity iteration methods
+
+### BDO Reverse Engineering (Engine Lineage)
+**URL**: https://secret.club/2019/01/24/reverse-engineering-bdo-2.html
+- BDO (same engine family) documented `ge::SelfPlayerActorProxy` and `ge::PlayerActorProxy` class hierarchies at `+0xBF8`
+- RTTI present in BDO builds (enables ReClass structure auto-identification)
+- **Action needed**: Check if Crimson Desert binary has RTTI symbols
+
+### Community / Discord Channels
+- **Crimson Mods Discord**: https://discord.com/invite/crimson-mods-849726791530315817 (modding-focused)
+- **Official Crimson Desert Discord**: https://discord.gg/crimsondesert (12,000+ members)
+- **Nexus Mods**: 256+ mods in first 2 weeks post-launch
 
 ### Save Editor Data (NattKh/CRIMSON-DESERT-SAVE-EDITOR)
 The save editor has reverse-engineered significant game data:

@@ -205,13 +205,19 @@ These are pages/tools I found during research but can't scrape due to auth/bot p
 
 ### Related Projects & Offset Sources
 
-- [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage signatures
+- [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage signatures (ASI mod, safetyhook)
 - [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework used by CD mods
 - [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpacker) - PAZ archive extraction tool
+- [pycrimson](https://github.com/LukeFZ/pycrimson) - Python PAZ/save decrypt library with reflection deserializer
+- [bbfox0703 Cheat Tables](https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables) - **220+ entry open-source CT** with reputation, friendship, durability offsets
+- [UltimateCameraMod](https://github.com/FitzDegenhub/UltimateCameraMod) - 150+ camera states in `playercamerapreset.xml`
+- [SWISS Knife Save Editor](https://www.nexusmods.com/crimsondesert/mods/20) - 633 quests, 5,450 missions, 2,262 items, 5,500+ knowledge entries
 - [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Address value table, XML configs
+- [CrimsonForge](https://github.com/hzeemr/crimsonforge) - Browse 1.4M game files, mesh/audio replacement, full PAZ round-trip
 - [Nexus Mods Cheat Table](https://www.nexusmods.com/crimsondesert/mods/64) - Cheat Engine table with pointer paths
-- [FearLess CE Community](https://fearlessrevolution.com/viewtopic.php?t=38679) - Active offset research
+- [FearLess CE Community](https://fearlessrevolution.com/viewtopic.php?t=38679) - Active offset research (16+ pages)
+- [BDO RE Article](https://secret.club/2019/01/24/reverse-engineering-bdo-2.html) - BlackSpace engine lineage RE (RTTI, actor proxy classes)
 - [CDUMM Mod Manager](https://www.nexusmods.com/crimsondesert/mods/207) - Recommended mod manager
 - [Elden Ring Seamless Co-op](https://github.com/LukeYui/EldenRingSeamlessCoopRelease) - Architectural inspiration
 
