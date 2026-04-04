@@ -181,14 +181,13 @@ void PlayerSync::on_remote_combat(const uint8_t* data, size_t size) {
 
     spdlog::debug("Remote combat action: type={}, skill={}", pkt->action, pkt->skill_id);
 
-    // Trigger combat animation on the companion entity (remote player)
+    // Mirror the remote player's last known animation on the companion entity.
+    // This avoids needing real combat animation IDs - we just replay whatever
+    // anim the remote player was performing when the combat packet was sent.
     auto& hijack = CompanionHijack::instance();
     if (hijack.is_active()) {
-        // Combat actions map to animation IDs. The action byte encodes:
-        //   0 = light attack, 1 = heavy attack, 2 = skill, 3 = dodge
-        // Use a base animation offset + action for now (needs real anim IDs from RE)
-        uint32_t combat_anim_base = 1000; // Placeholder base for combat anims
-        hijack.set_animation(combat_anim_base + pkt->action, 1.0f, 1.0f, 0.0f);
+        hijack.set_animation(interpolated_state_.animation_id, interpolated_state_.anim_blend,
+                             1.0f, 0.0f);
     }
 
     // If we're the host, apply damage to the target enemy

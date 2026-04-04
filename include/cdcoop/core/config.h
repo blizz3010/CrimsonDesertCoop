@@ -15,8 +15,9 @@ struct Config {
     float enemy_hp_multiplier = 1.5f;   // Scale enemy HP for 2 players
     float enemy_dmg_multiplier = 1.0f;  // Scale enemy damage
     float tether_distance = 150.0f;     // Max distance between players (meters)
-    bool sync_cutscenes = true;
-    bool sync_quest_progress = true;
+    bool sync_cutscenes = false;        // not yet implemented
+    bool sync_quest_progress = false;    // not yet implemented
+    bool skip_animation_remap = true;    // passthrough mode - no cross-model remap
 
     // Player 2 appearance
     int player2_model_id = -1; // -1 = same as host, otherwise specific model ID
@@ -38,7 +39,7 @@ struct Config {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Config,
         player_name, port, use_steam_networking,
         enemy_hp_multiplier, enemy_dmg_multiplier, tether_distance,
-        sync_cutscenes, sync_quest_progress,
+        sync_cutscenes, sync_quest_progress, skip_animation_remap,
         player2_model_id, player2_use_companion_slot,
         debug_overlay, log_packets, log_level,
         toggle_overlay_key, open_session_key
