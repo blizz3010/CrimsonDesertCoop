@@ -348,6 +348,15 @@ namespace offsets {
         // Dragon mount HP is reportedly difficult to find - community
         // reports it may not use standard StatEntry format, or may use
         // a different data type (float vs int). Status: UNRESOLVED.
+
+        // Dragon timer offset (from community CT research):
+        // During dragon entity access, r13+0x160 holds the flight/ability timer as a float.
+        // Hook point AOB still needed to capture r13 at the right moment.
+        constexpr uint32_t DRAGON_TIMER_OFFSET = 0x160; // float, at r13+0x160 during dragon entity access
+
+        // Dragon HP is confirmed to be float type, not int64*1000 like player/horse stats.
+        // This explains why standard 4-byte/8-byte CE scans fail to find it.
+        constexpr uint32_t DRAGON_HP_IS_FLOAT = 1; // dragon HP is float type, not int64*1000
     }
 
     // =========================================================================
@@ -656,6 +665,17 @@ namespace signatures {
     // NOP this to prevent item count decrease
     constexpr const char* ITEM_COUNT_DECREASE =
         "49 29 4C 07 10";
+
+    // --- Resistance Attributes (from bbfox0703 CT feature #24 "Get resistant attrs") ---
+    // Raw AOB for locating the resistance attribute access in game code.
+    // The pattern accesses stat entries via shl+add, then checks resistance flags.
+    constexpr const char* RESIST_ATTRS_RAW =
+        "48 C1 E2 04 48 03 90 18 01 00 00 45 84 ED 74 ?? 80 BA 8B 00 00 00 00 74 ?? 8B 42 04 44 0F A3 F0 73 ??";
+
+    // Injection point pattern for resistance attribute modification.
+    // Struct layout TBD - offsets within the resistance entry still need extraction.
+    constexpr const char* RESIST_ATTRS_INJECTION =
+        "?? 8B ?? 10 ?? 63 ?? ?? ?? ?? ?? ?? 3B ?? 7F ?? ?? 63 ?? ?? ?? ?? ?? ?? 3B ?? 7E ??";
 }
 
 // =========================================================================
