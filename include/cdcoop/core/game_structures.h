@@ -224,11 +224,15 @@ namespace offsets {
 
         // Verified authoritative position (from position_research.md):
         // Reached via: position_owner -> +0x248 -> position_struct -> +0x90
+        // NOTE: FearLess community reports a bulk copy path at exe+3A86ADA uses
+        // movups [rax+rdx+10],xmm1 which may handle float64 coordinates in a
+        // different cache layer. However, the authoritative position struct at +0x90
+        // stores float32 components (4 bytes each, confirmed by 4-byte spacing).
         constexpr uint32_t POS_OWNER_TO_STRUCT = 0x248; // Deref to position struct
-        constexpr uint32_t POS_STRUCT_X   = 0x90;  // float - X axis (verified)
-        constexpr uint32_t POS_STRUCT_Y   = 0x94;  // float - Y axis (verified)
-        constexpr uint32_t POS_STRUCT_Z   = 0x98;  // float - Z axis (verified)
-        constexpr uint32_t POS_STRUCT_W   = 0x9C;  // float - W/padding (verified)
+        constexpr uint32_t POS_STRUCT_X   = 0x90;  // float32 - X axis (verified)
+        constexpr uint32_t POS_STRUCT_Y   = 0x94;  // float32 - Y axis (verified)
+        constexpr uint32_t POS_STRUCT_Z   = 0x98;  // float32 - Z axis (verified)
+        constexpr uint32_t POS_STRUCT_W   = 0x9C;  // float32 - W/padding (verified)
 
         // Rotation quaternion immediately follows position (estimated from BlackSpace layout)
         constexpr uint32_t ROTATION_QUAT  = 0xA0;  // float4 [x,y,z,w] - 16 bytes after position
