@@ -65,19 +65,34 @@ void EnemySync::update(float delta_time) {
         if (!is_valid_ptr(entity)) continue;
         if (entity == player || entity == companion) continue;
 
-        // Read enemy state and broadcast
-        Vec3 pos = {
-            read_mem<float>(entity, offsets::Player::POSITION_X),
-            read_mem<float>(entity, offsets::Player::POSITION_Y),
-            read_mem<float>(entity, offsets::Player::POSITION_Z)
-        };
+        // Read enemy position via the verified pointer chain
+        Vec3 pos = {0, 0, 0};
+        uintptr_t core = resolve_ptr_chain(entity, {
+            offsets::Player::ACTOR_TO_INNER,
+            offsets::Player::INNER_TO_CORE
+        });
+        if (is_valid_ptr(core)) {
+            uintptr_t pos_struct = resolve_ptr_chain(core, {
+                offsets::Player::POS_OWNER_TO_STRUCT
+            });
+            if (is_valid_ptr(pos_struct)) {
+                pos = {
+                    read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X),
+                    read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y),
+                    read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z)
+                };
+            }
+        }
         uint32_t state = read_mem<uint32_t>(entity, offsets::Enemy::STATE);
 
         // Read enemy health via the stat entry system (same as player)
-        // HP is int64 * 1000 in the stat component
-        int64_t raw_hp = read_mem<int64_t>(entity,
-            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE);
-        float health = static_cast<float>(raw_hp) / 1000.0f;
+        // Stats component is a pointer at actor+0x58, dereference to get base
+        float health = 0.0f;
+        uintptr_t stat_base = resolve_ptr_chain(entity, {offsets::Player::STAT_COMPONENT});
+        if (is_valid_ptr(stat_base)) {
+            int64_t raw_hp = read_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE);
+            health = static_cast<float>(raw_hp) / 1000.0f;
+        }
 
         uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
         on_enemy_state_changed(entity_id, pos, {0,0,0,1}, health, state);
@@ -164,20 +179,18 @@ void EnemySync::apply_coop_scaling() {
 
         uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
 
-        // Try to find the entity's stat component and scale max health
-        uintptr_t stat_comp = entity + offsets::Player::STAT_COMPONENT;
-        if (is_valid_ptr(stat_comp)) {
-            // Read the first stat entry (health = type 0) from the stat array
-            // Entries are 16 bytes each, health is typically the first
-            int64_t max_hp = read_mem<int64_t>(stat_comp, StatEntry::MAX_VALUE);
+        // Dereference the stats component pointer and scale max health
+        uintptr_t stat_base = resolve_ptr_chain(entity, {offsets::Player::STAT_COMPONENT});
+        if (is_valid_ptr(stat_base)) {
+            int64_t max_hp = read_mem<int64_t>(stat_base, StatEntry::MAX_VALUE);
             if (max_hp > 0) {
                 // Save original value
                 original_stats_[entity_id] = { static_cast<float>(max_hp) };
 
                 // Scale up
                 int64_t scaled_hp = static_cast<int64_t>(max_hp * cfg.enemy_hp_multiplier);
-                write_mem<int64_t>(entity, offsets::Player::STAT_COMPONENT + StatEntry::MAX_VALUE, scaled_hp);
-                write_mem<int64_t>(entity, offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE, scaled_hp);
+                write_mem<int64_t>(stat_base, StatEntry::MAX_VALUE, scaled_hp);
+                write_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE, scaled_hp);
                 scaled_count++;
             }
         }
@@ -204,8 +217,11 @@ void EnemySync::revert_coop_scaling() {
             uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
             auto it = original_stats_.find(entity_id);
             if (it != original_stats_.end()) {
-                int64_t original_hp = static_cast<int64_t>(it->second.max_health);
-                write_mem<int64_t>(entity, offsets::Player::STAT_COMPONENT + StatEntry::MAX_VALUE, original_hp);
+                uintptr_t stat_base = resolve_ptr_chain(entity, {offsets::Player::STAT_COMPONENT});
+                if (is_valid_ptr(stat_base)) {
+                    int64_t original_hp = static_cast<int64_t>(it->second.max_health);
+                    write_mem<int64_t>(stat_base, StatEntry::MAX_VALUE, original_hp);
+                }
             }
         }
     }
@@ -285,10 +301,11 @@ void EnemySync::on_remote_enemy_damage(const uint8_t* data, size_t size) {
         uint32_t eid = static_cast<uint32_t>(entity & 0xFFFFFFFF);
         if (eid != pkt->entity_id) continue;
 
-        // Read current HP, subtract damage, write back
-        // HP is int64 * 1000 in the stat entry system
-        int64_t current_hp = read_mem<int64_t>(entity,
-            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE);
+        // Dereference stats component and apply damage
+        uintptr_t stat_base = resolve_ptr_chain(entity, {offsets::Player::STAT_COMPONENT});
+        if (!is_valid_ptr(stat_base)) break;
+
+        int64_t current_hp = read_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE);
         int64_t damage_scaled = static_cast<int64_t>(validated_damage * 1000.0f);
         int64_t new_hp = current_hp - damage_scaled;
 
@@ -297,8 +314,7 @@ void EnemySync::on_remote_enemy_damage(const uint8_t* data, size_t size) {
             on_enemy_death(pkt->entity_id);
         }
 
-        write_mem<int64_t>(entity,
-            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE, new_hp);
+        write_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE, new_hp);
         break;
     }
 }
@@ -324,9 +340,11 @@ void EnemySync::on_remote_enemy_death(const uint8_t* data, size_t size) {
         uint32_t eid = static_cast<uint32_t>(entity & 0xFFFFFFFF);
         if (eid != pkt->entity_id) continue;
 
-        // Zero out HP
-        write_mem<int64_t>(entity,
-            offsets::Player::STAT_COMPONENT + StatEntry::CURRENT_VALUE, 0);
+        // Zero out HP via dereferenced stats component
+        uintptr_t stat_base = resolve_ptr_chain(entity, {offsets::Player::STAT_COMPONENT});
+        if (is_valid_ptr(stat_base)) {
+            write_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE, 0);
+        }
         break;
     }
 }

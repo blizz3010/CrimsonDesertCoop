@@ -32,6 +32,9 @@ public:
     // Steam callback: when a friend accepts the invite
     void on_lobby_join(uint64_t steam_id);
 
+    // Allow the connection status callback to access impl_
+    friend void on_connection_status_changed(struct SteamNetConnectionStatusChangedCallback_t*);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

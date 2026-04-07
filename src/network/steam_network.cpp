@@ -13,23 +13,9 @@
 
 namespace cdcoop {
 
-// Connection status change callback
-static void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
-    // This fires when connection state transitions (connecting, connected, disconnected, etc.)
-    spdlog::info("Steam: connection status changed to {}", info->m_info.m_eState);
-
-    switch (info->m_info.m_eState) {
-        case k_ESteamNetworkingConnectionState_Connected:
-            spdlog::info("Steam: peer connected");
-            break;
-        case k_ESteamNetworkingConnectionState_ClosedByPeer:
-        case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
-            spdlog::warn("Steam: connection lost (reason: {})", info->m_info.m_eEndReason);
-            break;
-        default:
-            break;
-    }
-}
+// Static pointer to the active transport so the free callback can access it.
+// Only one SteamNetworkTransport instance should be active at a time.
+static SteamNetworkTransport* g_active_transport = nullptr;
 
 struct SteamNetworkTransport::Impl {
     HSteamNetConnection connection = k_HSteamNetConnection_Invalid;
@@ -39,8 +25,61 @@ struct SteamNetworkTransport::Impl {
     std::string peer_name_str;
 };
 
+// Connection status change callback - uses g_active_transport to update state
+static void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
+    spdlog::info("Steam: connection status changed to {}", info->m_info.m_eState);
+
+    if (!g_active_transport || !g_active_transport->impl_) return;
+    auto* impl = g_active_transport->impl_.get();
+
+    switch (info->m_info.m_eState) {
+        case k_ESteamNetworkingConnectionState_Connecting:
+            // Host: accept incoming P2P connections on our listen socket
+            if (impl->listen_socket != k_HSteamListenSocket_Invalid && impl->sockets) {
+                spdlog::info("Steam: accepting incoming connection");
+                if (impl->sockets->AcceptConnection(info->m_hConn) != k_EResultOK) {
+                    spdlog::error("Steam: failed to accept connection");
+                    impl->sockets->CloseConnection(info->m_hConn, 0, "AcceptFailed", false);
+                }
+            }
+            break;
+
+        case k_ESteamNetworkingConnectionState_Connected:
+            spdlog::info("Steam: peer connected");
+            impl->connection = info->m_hConn;
+            impl->connected = true;
+            // Try to resolve peer name via Steam Friends API
+            {
+                SteamNetConnectionInfo_t conn_info;
+                if (impl->sockets->GetConnectionInfo(info->m_hConn, &conn_info)) {
+                    CSteamID peer_id = conn_info.m_identityRemote.GetSteamID();
+                    if (peer_id.IsValid()) {
+                        impl->peer_name_str = SteamFriends()->GetFriendPersonaName(peer_id);
+                        spdlog::info("Steam: peer name: {}", impl->peer_name_str);
+                    }
+                }
+            }
+            break;
+
+        case k_ESteamNetworkingConnectionState_ClosedByPeer:
+        case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
+            spdlog::warn("Steam: connection lost (reason: {})", info->m_info.m_eEndReason);
+            if (info->m_hConn == impl->connection) {
+                impl->sockets->CloseConnection(info->m_hConn, 0, nullptr, false);
+                impl->connection = k_HSteamNetConnection_Invalid;
+                impl->connected = false;
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
 SteamNetworkTransport::SteamNetworkTransport() : impl_(std::make_unique<Impl>()) {
     spdlog::info("Steam network transport created");
+
+    g_active_transport = this;
 
     // Initialize Steam networking interface
     impl_->sockets = SteamNetworkingSockets();
@@ -52,6 +91,9 @@ SteamNetworkTransport::SteamNetworkTransport() : impl_(std::make_unique<Impl>())
 
 SteamNetworkTransport::~SteamNetworkTransport() {
     disconnect();
+    if (g_active_transport == this) {
+        g_active_transport = nullptr;
+    }
 }
 
 bool SteamNetworkTransport::host(uint16_t port) {
@@ -140,6 +182,9 @@ bool SteamNetworkTransport::send(const uint8_t* data, size_t size, bool reliable
 void SteamNetworkTransport::poll() {
     if (!impl_->sockets) return;
 
+    // Run callbacks for connection state changes (needed for both host and client)
+    impl_->sockets->RunCallbacks();
+
     // Poll for incoming messages
     ISteamNetworkingMessage* messages[16];
     int count = 0;
@@ -152,16 +197,14 @@ void SteamNetworkTransport::poll() {
     for (int i = 0; i < count; ++i) {
         auto* msg = messages[i];
         if (msg->m_cbSize >= static_cast<int>(sizeof(PacketHeader)) && on_packet_) {
-            auto* header = reinterpret_cast<const PacketHeader*>(msg->m_pData);
-            on_packet_(header->type, reinterpret_cast<const uint8_t*>(msg->m_pData),
-                       msg->m_cbSize);
+            if (PacketBuilder::validate(reinterpret_cast<const uint8_t*>(msg->m_pData),
+                                        msg->m_cbSize)) {
+                auto* header = reinterpret_cast<const PacketHeader*>(msg->m_pData);
+                on_packet_(header->type, reinterpret_cast<const uint8_t*>(msg->m_pData),
+                           msg->m_cbSize);
+            }
         }
         msg->Release();
-    }
-
-    // Also poll the listen socket for new connections (host only)
-    if (impl_->listen_socket != k_HSteamListenSocket_Invalid) {
-        impl_->sockets->RunCallbacks();
     }
 }
 

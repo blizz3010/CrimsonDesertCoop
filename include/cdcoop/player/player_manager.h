@@ -19,6 +19,7 @@ public:
     Vec3 local_position() const;
     Quat local_rotation() const;
     float local_health() const;
+    float local_max_health() const;
 
     // Remote player (the hijacked companion entity)
     uintptr_t remote_player() const;

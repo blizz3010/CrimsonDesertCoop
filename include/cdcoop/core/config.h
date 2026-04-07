@@ -15,8 +15,8 @@ struct Config {
     float enemy_hp_multiplier = 1.5f;   // Scale enemy HP for 2 players
     float enemy_dmg_multiplier = 1.0f;  // Scale enemy damage
     float tether_distance = 150.0f;     // Max distance between players (meters)
-    bool sync_cutscenes = false;        // not yet implemented
-    bool sync_quest_progress = false;    // not yet implemented
+    bool sync_cutscenes = true;
+    bool sync_quest_progress = true;
     bool skip_animation_remap = true;    // passthrough mode - no cross-model remap
 
     // Player 2 appearance

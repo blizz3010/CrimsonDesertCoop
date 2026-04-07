@@ -220,6 +220,9 @@ namespace offsets {
         constexpr uint32_t POS_STRUCT_Z   = 0x98;  // float - Z axis (verified)
         constexpr uint32_t POS_STRUCT_W   = 0x9C;  // float - W/padding (verified)
 
+        // Rotation quaternion immediately follows position (estimated from BlackSpace layout)
+        constexpr uint32_t ROTATION_QUAT  = 0xA0;  // float4 [x,y,z,w] - 16 bytes after position
+
         // Position also accessible at hook time via r13 pointer:
         // r13 = float* pointing directly at the position vector
         constexpr uint32_t POSITION_X     = 0x00;  // float (xmm0.f32[0]) - at r13
