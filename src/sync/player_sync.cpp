@@ -96,6 +96,7 @@ void PlayerSync::update(float delta_time) {
         hijack.set_position(interpolated_state_.position, interpolated_state_.rotation);
         hijack.set_animation(interpolated_state_.animation_id, interpolated_state_.anim_blend,
                              1.0f, 0.0f);
+        hijack.set_health(interpolated_state_.health, interpolated_state_.max_health);
     }
 
     // Tether check
@@ -224,11 +225,24 @@ void PlayerSync::interpolate_remote_state(float delta_time) {
     interpolated_state_.position.y += (target.position.y - interpolated_state_.position.y) * t;
     interpolated_state_.position.z += (target.position.z - interpolated_state_.position.z) * t;
 
-    // Simple rotation lerp (proper slerp would be better, but this works for now)
-    interpolated_state_.rotation.x += (target.rotation.x - interpolated_state_.rotation.x) * t;
-    interpolated_state_.rotation.y += (target.rotation.y - interpolated_state_.rotation.y) * t;
-    interpolated_state_.rotation.z += (target.rotation.z - interpolated_state_.rotation.z) * t;
-    interpolated_state_.rotation.w += (target.rotation.w - interpolated_state_.rotation.w) * t;
+    // Normalized lerp (nlerp) for quaternion interpolation.
+    // Handle antipodal case: if dot product < 0, negate target to take shortest path.
+    auto& cur = interpolated_state_.rotation;
+    Quat tgt = target.rotation;
+    float dot = cur.x * tgt.x + cur.y * tgt.y + cur.z * tgt.z + cur.w * tgt.w;
+    if (dot < 0.0f) {
+        tgt.x = -tgt.x; tgt.y = -tgt.y; tgt.z = -tgt.z; tgt.w = -tgt.w;
+    }
+    cur.x += (tgt.x - cur.x) * t;
+    cur.y += (tgt.y - cur.y) * t;
+    cur.z += (tgt.z - cur.z) * t;
+    cur.w += (tgt.w - cur.w) * t;
+    // Re-normalize to maintain unit quaternion
+    float len = std::sqrt(cur.x * cur.x + cur.y * cur.y + cur.z * cur.z + cur.w * cur.w);
+    if (len > 0.0001f) {
+        float inv = 1.0f / len;
+        cur.x *= inv; cur.y *= inv; cur.z *= inv; cur.w *= inv;
+    }
 
     interpolated_state_.health = target.health;
     interpolated_state_.max_health = target.max_health;

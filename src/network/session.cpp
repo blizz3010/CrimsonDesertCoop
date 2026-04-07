@@ -7,6 +7,7 @@
 #include <cdcoop/player/player_manager.h>
 #include <spdlog/spdlog.h>
 #include <Windows.h>
+#include <vector>
 
 namespace cdcoop {
 
@@ -123,13 +124,16 @@ void Session::leave_session() {
 
 void Session::send(const uint8_t* data, size_t size, bool reliable) {
     if (transport_ && transport_->is_connected()) {
-        // Stamp sequence number and timestamp on outgoing packets
         if (size >= sizeof(PacketHeader)) {
-            auto* hdr = const_cast<PacketHeader*>(reinterpret_cast<const PacketHeader*>(data));
+            // Copy packet data to stamp sequence/timestamp without mutating caller's data
+            std::vector<uint8_t> buf(data, data + size);
+            auto* hdr = reinterpret_cast<PacketHeader*>(buf.data());
             hdr->sequence = sequence_++;
             hdr->timestamp_ms = static_cast<uint32_t>(GetTickCount64() & 0xFFFFFFFF);
+            transport_->send(buf.data(), buf.size(), reliable);
+        } else {
+            transport_->send(data, size, reliable);
         }
-        transport_->send(data, size, reliable);
     }
 }
 
