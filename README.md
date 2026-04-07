@@ -68,7 +68,7 @@ cmake --build build --config Release
 
 ## Installation
 
-### Recommended: Using CDUMM (Crimson Desert Ultimate Mods Manager)
+### Recommended: Using a Mod Manager (JSON Mods Manager)
 
 This mod works best with [JSON Mod Manager]([https://www.nexusmods.com/crimsondesert/mods/207](https://www.nexusmods.com/crimsondesert/mods/113)), which handles ASI loader setup and mod conflict detection automatically.
 
