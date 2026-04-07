@@ -173,8 +173,16 @@ void CompanionHijack::set_animation(uint32_t anim_id, float blend, float speed, 
 void CompanionHijack::set_health(float health, float max_health) {
     if (!active_ || hijacked_entity_ == 0) return;
 
-    // Sync player 2's health display
-    // This is mainly cosmetic - the actual HP is tracked by the remote player's game
+    // Write player 2's health to the companion entity's stat component so the
+    // game engine renders the correct health bar. Uses the same StatEntry format
+    // as the player (int64, displayed_value * 1000).
+    uintptr_t stat_base = resolve_ptr_chain(hijacked_entity_, {offsets::Player::STAT_COMPONENT});
+    if (is_valid_ptr(stat_base)) {
+        write_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE,
+                           static_cast<int64_t>(health * 1000.0f));
+        write_mem<int64_t>(stat_base, StatEntry::MAX_VALUE,
+                           static_cast<int64_t>(max_health * 1000.0f));
+    }
 }
 
 void CompanionHijack::disable_ai() {

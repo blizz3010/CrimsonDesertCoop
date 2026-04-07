@@ -339,8 +339,22 @@ void __cdecl player_position_detour(void* player, float x, float y, float z) {
     // Broadcast our position to peer
     if (Session::instance().is_active()) {
         Vec3 pos{x, y, z};
-        // Read rotation from the player actor if available
+        // Read rotation from the player actor via the verified pointer chain
         Quat rot{0, 0, 0, 1};
+        auto& rt = get_runtime_offsets();
+        if (is_valid_ptr(rt.player_actor_ptr)) {
+            uintptr_t player_core = resolve_ptr_chain(rt.player_actor_ptr, {
+                offsets::Player::ACTOR_TO_INNER, offsets::Player::INNER_TO_CORE
+            });
+            if (is_valid_ptr(player_core)) {
+                uintptr_t pos_struct = resolve_ptr_chain(player_core, {
+                    offsets::Player::POS_OWNER_TO_STRUCT
+                });
+                if (is_valid_ptr(pos_struct)) {
+                    rot = read_mem<Quat>(pos_struct, offsets::Player::ROTATION_QUAT);
+                }
+            }
+        }
         Vec3 vel{0, 0, 0};
         PlayerSync::instance().on_local_position_changed(pos, rot, vel, 0);
     }
