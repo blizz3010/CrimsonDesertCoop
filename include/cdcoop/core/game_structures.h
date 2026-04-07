@@ -315,14 +315,20 @@ namespace offsets {
         // 0010\0.paz), NOT runtime memory writes. The full runtime camera struct layout
         // beyond +0xD8 is unmapped by the community.
         //
-        // Camera XML parameters (from UltimateCameraMod/CameraRules.cs) for reference:
-        //   ZoomDistance, UpOffset, RightOffset, Fov, InDoorFov, MaxZoomDistance,
-        //   InDoorUpOffset, InDoorRightOffset, PivotHeight,
-        //   BlendInTime, BlendOutTime, DampSpeed, PivotDampingMaxDistance,
-        //   OffsetLength (velocity sway), TargetRate, ScreenClampRate,
-        //   IsAutoRotate, IsTargetFixed, LimitUnderDistance,
-        //   FollowYawSpeedRate, FollowPitchSpeedRate, FollowStartTime,
-        //   FollowDefaultPitch
+        // Camera XML parameters (from UltimateCameraMod CameraParamDocs.cs + CameraRules.cs):
+        // Section-level: Fov, FollowPitchSpeedRate, FollowYawSpeedRate, FollowStartTime,
+        //   FollowDefaultPitch, TargetRate, ScreenClampRate, LimitUnderDistance,
+        //   IsAutoRotate, IsTargetFixed, InputDampingRate, UseZoomInByPitch
+        // ZoomLevel[0-4]: ZoomDistance, MaxZoomDistance, UpOffset, RightOffset,
+        //   InDoorUpOffset, InDoorRightOffset, Fov, InDoorFov, PitchMin, PitchMax,
+        //   ZoomInSpeed, ZoomOutSpeed, RotateSpeed, CollisionRadius, CollisionOffset,
+        //   DistanceMin, DistanceMax, EnableDepthOfField, Aperture, FocalLength
+        // Sub-elements: CameraBlendParameter (BlendInTime/OutTime/EaseType),
+        //   OffsetByVelocity (OffsetLength/DampSpeed), CameraDamping (PivotDamping*),
+        //   PivotHeight (HeightRatio)
+        // 150+ camera state sections (Player_Basic_Default, Player_Weapon_LockOn,
+        //   Player_Ride_Horse, Cinematic_LockOn, etc.)
+        // PAZ file: 0010/0.paz -> source/actionchart/playercamerapreset.xml
         // These are loaded from PAZ data at startup and likely populate the runtime
         // camera struct surrounding the +0xD8 field. Adjacent fields are likely:
         //   - Camera position (Vec3), target position (Vec3)
