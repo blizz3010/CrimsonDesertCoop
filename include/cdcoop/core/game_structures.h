@@ -273,11 +273,31 @@ namespace offsets {
     }
 
     namespace Camera {
-        // Camera struct offsets (from Send's CE table, game v1.00.03)
+        // Camera runtime struct (from Send's CE table, game v1.00.03)
         // The camera zoom/FOV write instruction:
         //   movss [r12+0xD8], xmm0
         // r12 = camera struct base during the zoom/FOV write path
         constexpr uint32_t ZOOM_FOV       = 0xD8;   // float - zoom/FOV value (default ~8.0 at max zoom out)
+
+        // NOTE: All existing camera mods (UltimateCameraMod, CDCamera, Proper3rdPerson)
+        // work via PAZ archive XML modification (editing playercamerapreset.xml inside
+        // 0010\0.paz), NOT runtime memory writes. The full runtime camera struct layout
+        // beyond +0xD8 is unmapped by the community.
+        //
+        // Camera XML parameters (from UltimateCameraMod/CameraRules.cs) for reference:
+        //   ZoomDistance, UpOffset, RightOffset, Fov, InDoorFov, MaxZoomDistance,
+        //   InDoorUpOffset, InDoorRightOffset, PivotHeight,
+        //   BlendInTime, BlendOutTime, DampSpeed, PivotDampingMaxDistance,
+        //   OffsetLength (velocity sway), TargetRate, ScreenClampRate,
+        //   IsAutoRotate, IsTargetFixed, LimitUnderDistance,
+        //   FollowYawSpeedRate, FollowPitchSpeedRate, FollowStartTime,
+        //   FollowDefaultPitch
+        // These are loaded from PAZ data at startup and likely populate the runtime
+        // camera struct surrounding the +0xD8 field. Adjacent fields are likely:
+        //   - Camera position (Vec3), target position (Vec3)
+        //   - Pitch/yaw angles, distance, up/right offsets
+        //   - Blend/damping timers
+        // Mapping these requires CE scanning near the known +0xD8 address at runtime.
     }
 
     namespace Contribution {
