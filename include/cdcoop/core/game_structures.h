@@ -86,8 +86,35 @@ namespace DurabilityEntry {
 // =========================================================================
 namespace ActorStructure {
     constexpr uint32_t VTABLE         = 0x00;   // ptr - vtable pointer
+    constexpr uint32_t MARKER         = 0x20;   // ptr - status marker (actor+0x20)
     constexpr uint32_t COMPONENT_LINK = 0x48;   // ptr - component linkage
     constexpr uint32_t D8_FIELD       = 0xD8;   // ptr - fallback mode field
+
+    // Actor type detection chain (from EquipHide player_detection.cpp):
+    // candidate+0x48 -> component -> +0x08 -> actor -> +0x88 -> type_ptr -> +0x01 = type byte
+    // Type byte values: 0x01 = local player, 0x03-0x06 = party members
+    constexpr uint32_t TYPE_CHAIN_COMP = 0x48;  // component pointer
+    constexpr uint32_t TYPE_CHAIN_ACTOR= 0x08;  // actor from component
+    constexpr uint32_t TYPE_CHAIN_TYPE = 0x88;  // type pointer from actor
+    constexpr uint32_t TYPE_BYTE       = 0x01;  // type byte offset within type_ptr
+    constexpr uint8_t  TYPE_LOCAL_PLAYER = 0x01;
+    constexpr uint8_t  TYPE_PARTY_MIN    = 0x03;
+    constexpr uint8_t  TYPE_PARTY_MAX    = 0x06;
+
+    // Actor resolution chain (from Orcax player-status-modifier actor_resolve.cpp):
+    // marker+0x08 -> marker_owner -> +0x68 -> resolved_actor -> +0x20 -> confirmed_marker
+    // marker+0x18 -> root -> +0x00 -> root_marker (validation) -> root+0x58 -> health_entry
+    constexpr uint32_t MARKER_TO_OWNER = 0x08;  // marker -> marker_owner
+    constexpr uint32_t OWNER_TO_ACTOR  = 0x68;  // marker_owner -> resolved_actor
+    constexpr uint32_t ACTOR_TO_MARKER = 0x20;  // actor -> marker (for validation)
+    constexpr uint32_t MARKER_TO_ROOT  = 0x18;  // marker -> root (stat entry container)
+    constexpr uint32_t ROOT_TO_HEALTH  = 0x58;  // root -> health_entry
+
+    // Damage source resolution (from Orcax damage_logic.cpp):
+    // source_context+0x68 -> source_actor -> +0x20 -> source_marker
+    // DamageCallback stack: rsp+0x00 = return_address, rsp+0x28 = source_context
+    constexpr uint32_t DMG_CTX_TO_ACTOR = 0x68; // damage context -> source actor
+    constexpr uint32_t DMG_STACK_CTX    = 0x28; // rsp offset to damage source context
 
     // Body offsets (player candidate pointers within actor)
     constexpr uint32_t BODY_SLOT_0    = 0xD0;
