@@ -149,8 +149,8 @@ void CompanionHijack::set_position(const Vec3& pos, const Quat& rot) {
             write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X, pos.x);
             write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y, pos.y);
             write_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z, pos.z);
-            // Rotation: write to the next float4 slot after position (+0xA0)
-            write_mem<Quat>(pos_struct, offsets::Player::POS_STRUCT_X + 0x10, rot);
+            // Rotation quaternion at +0xA0 (right after position at +0x90)
+            write_mem<Quat>(pos_struct, offsets::Player::ROTATION_QUAT, rot);
             return;
         }
     }

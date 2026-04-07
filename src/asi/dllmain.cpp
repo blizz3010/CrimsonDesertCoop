@@ -15,6 +15,7 @@
 #include <cdcoop/sync/world_sync.h>
 #include <cdcoop/player/companion_hijack.h>
 #include <cdcoop/player/player_manager.h>
+#include <cdcoop/sync/animation_sync.h>
 #include <cdcoop/ui/overlay.h>
 
 namespace {
@@ -69,6 +70,7 @@ void mod_main() {
         cdcoop::PlayerSync::instance().initialize();
         cdcoop::EnemySync::instance().initialize();
         cdcoop::WorldSync::instance().initialize();
+        cdcoop::AnimationSync::instance().initialize();
         spdlog::info("Sync systems initialized");
 
         // Step 4: Initialize companion hijack system

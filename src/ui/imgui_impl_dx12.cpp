@@ -9,6 +9,11 @@
 #include <cdcoop/ui/overlay.h>
 #include <cdcoop/core/hooks.h>
 #include <cdcoop/core/game_structures.h>
+#include <cdcoop/network/session.h>
+#include <cdcoop/sync/player_sync.h>
+#include <cdcoop/sync/enemy_sync.h>
+#include <cdcoop/sync/world_sync.h>
+#include <cdcoop/player/player_manager.h>
 #include <spdlog/spdlog.h>
 
 #include <Windows.h>
@@ -55,6 +60,7 @@ static bool need_resize = false;
 static UINT back_buffer_count = 0;
 
 // Frame timing for delta_time
+static ID3D12CommandQueue* imgui_cmd_queue = nullptr;
 static LARGE_INTEGER perf_freq = {};
 static LARGE_INTEGER last_frame_time = {};
 
@@ -124,6 +130,16 @@ static bool init_imgui(IDXGISwapChain* swap_chain) {
     for (UINT i = 0; i < back_buffer_count; i++) {
         rtv_handles[i] = rtv_handle;
         rtv_handle.ptr += rtv_increment;
+    }
+
+    // Create a persistent command queue for ImGui rendering
+    {
+        D3D12_COMMAND_QUEUE_DESC qd = {};
+        qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        if (FAILED(device->CreateCommandQueue(&qd, IID_PPV_ARGS(&imgui_cmd_queue)))) {
+            spdlog::error("DX12 Hook: Failed to create ImGui command queue");
+            return false;
+        }
     }
 
     // Create command allocators and list
@@ -204,6 +220,38 @@ static HRESULT __stdcall present_detour(IDXGISwapChain* swap_chain, UINT sync_in
     // Clamp delta to avoid large jumps (e.g. during loading)
     if (delta_time > 0.1f) delta_time = 0.1f;
 
+    // =====================================================================
+    // Co-op update loop - runs every frame via DX12 Present hook
+    // This is the main tick for all networking, sync, and input processing.
+    // =====================================================================
+    {
+        auto& session = cdcoop::Session::instance();
+        if (session.is_active()) {
+            session.update(delta_time);
+            cdcoop::PlayerSync::instance().update(delta_time);
+            cdcoop::EnemySync::instance().update(delta_time);
+            cdcoop::WorldSync::instance().update(delta_time);
+        }
+        cdcoop::PlayerManager::instance().update(delta_time);
+
+        // Hotkey processing
+        static bool f7_was_pressed = false;
+        bool f7_pressed = (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
+        if (f7_pressed && !f7_was_pressed) {
+            if (session.state() == cdcoop::SessionState::DISCONNECTED) {
+                session.host_session();
+            }
+        }
+        f7_was_pressed = f7_pressed;
+
+        static bool f8_was_pressed = false;
+        bool f8_pressed = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+        if (f8_pressed && !f8_was_pressed) {
+            cdcoop::Overlay::instance().toggle_visible();
+        }
+        f8_was_pressed = f8_pressed;
+    }
+
     // Start ImGui frame
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -245,20 +293,10 @@ static HRESULT __stdcall present_detour(IDXGISwapChain* swap_chain, UINT sync_in
 
         cmd_list->Close();
 
-        // Execute on the game's command queue
-        // We need to find the command queue - get it from the device
-        // This is a simplified approach; in practice, we'd hook ExecuteCommandLists
-        // to capture the queue pointer
-        ID3D12CommandQueue* cmd_queue = nullptr;
-        // The command queue can be obtained from the swap chain's creation context
-        // For now, we create our own (this may cause ordering issues with the game)
-        D3D12_COMMAND_QUEUE_DESC qd = {};
-        qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        device->CreateCommandQueue(&qd, IID_PPV_ARGS(&cmd_queue));
-        if (cmd_queue) {
+        // Execute on our persistent command queue
+        if (imgui_cmd_queue) {
             ID3D12CommandList* lists[] = { cmd_list };
-            cmd_queue->ExecuteCommandLists(1, lists);
-            cmd_queue->Release();
+            imgui_cmd_queue->ExecuteCommandLists(1, lists);
         }
     }
 
@@ -374,6 +412,7 @@ void remove_present_hook() {
     cleanup_render_targets();
     if (cmd_list) { cmd_list->Release(); cmd_list = nullptr; }
     for (auto& alloc : cmd_allocators) { if (alloc) { alloc->Release(); alloc = nullptr; } }
+    if (imgui_cmd_queue) { imgui_cmd_queue->Release(); imgui_cmd_queue = nullptr; }
     if (srv_heap) { srv_heap->Release(); srv_heap = nullptr; }
     if (rtv_heap) { rtv_heap->Release(); rtv_heap = nullptr; }
     if (device) { device->Release(); device = nullptr; }

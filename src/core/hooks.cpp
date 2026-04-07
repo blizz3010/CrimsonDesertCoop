@@ -240,6 +240,16 @@ bool HookManager::resolve_player_actor() {
     rt.player_actor_ptr = player;
     rt.player_resolved = true;
     spdlog::info("Player actor resolved at 0x{:X}", player);
+
+    // Resolve the stats component (pointer at actor + 0x58)
+    uintptr_t stat_base = resolve_ptr_chain(player, {offsets::Player::STAT_COMPONENT});
+    if (is_valid_ptr(stat_base)) {
+        rt.player_stats_component = stat_base;
+        spdlog::info("Player stats component at 0x{:X}", stat_base);
+    } else {
+        spdlog::warn("Player stats component not found");
+    }
+
     return true;
 }
 
@@ -267,6 +277,9 @@ bool HookManager::resolve_player_base() {
                 if (is_valid_ptr(actor)) {
                     rt.player_actor_ptr = actor;
                     rt.player_resolved = true;
+                    // Also resolve stats component
+                    uintptr_t sb = resolve_ptr_chain(actor, {offsets::Player::STAT_COMPONENT});
+                    if (is_valid_ptr(sb)) rt.player_stats_component = sb;
                     spdlog::info("Player resolved via PlayerBaseDiscovery sig at 0x{:X}", actor);
                     return true;
                 }
@@ -288,6 +301,9 @@ bool HookManager::resolve_player_base() {
         if (is_valid_ptr(actor)) {
             rt.player_actor_ptr = actor;
             rt.player_resolved = true;
+            // Also resolve stats component
+            uintptr_t sb = resolve_ptr_chain(actor, {offsets::Player::STAT_COMPONENT});
+            if (is_valid_ptr(sb)) rt.player_stats_component = sb;
             spdlog::info("Player resolved via static base (0x{:X}) at 0x{:X}",
                          offsets::PlayerBase::STATIC_RVA, actor);
             return true;
@@ -304,39 +320,11 @@ bool HookManager::resolve_player_base() {
 
 namespace hooks {
 
-void __cdecl game_tick_detour(void* game_instance, float delta_time) {
-    // Call original first
-    game_tick_hook.call<void>(game_instance, delta_time);
-
-    // Then run our co-op update logic
-    auto& session = Session::instance();
-    if (session.is_active()) {
-        session.update(delta_time);
-        PlayerSync::instance().update(delta_time);
-        EnemySync::instance().update(delta_time);
-        WorldSync::instance().update(delta_time);
-    }
-
-    // Update overlay regardless of session state
-    Overlay::instance().render();
-
-    // Check hotkeys
-    static bool f7_was_pressed = false;
-    bool f7_pressed = (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
-    if (f7_pressed && !f7_was_pressed) {
-        if (session.state() == SessionState::DISCONNECTED) {
-            session.host_session();
-        }
-    }
-    f7_was_pressed = f7_pressed;
-
-    static bool f8_was_pressed = false;
-    bool f8_pressed = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-    if (f8_pressed && !f8_was_pressed) {
-        Overlay::instance().toggle_visible();
-    }
-    f8_was_pressed = f8_pressed;
-}
+// NOTE: game_tick_detour is no longer used. The core update loop (session polling,
+// sync updates, hotkey processing) is now driven by the DX12 Present hook in
+// imgui_impl_dx12.cpp, which fires every frame with accurate delta_time.
+// The game_tick_hook inline hook was never installed because no dedicated game tick
+// signature exists for the BlackSpace Engine.
 
 void __cdecl player_position_detour(void* player, float x, float y, float z) {
     // Call original

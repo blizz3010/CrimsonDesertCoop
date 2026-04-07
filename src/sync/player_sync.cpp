@@ -68,16 +68,22 @@ void PlayerSync::update(float delta_time) {
         full_state_timer_ = 0.0f;
 
         auto& pm = PlayerManager::instance();
+        auto& rt = get_runtime_offsets();
         PlayerFullStatePacket pkt{};
         pkt.header.type = PacketType::PLAYER_FULL_STATE;
         pkt.header.payload_size = sizeof(pkt) - sizeof(PacketHeader);
         pkt.position = pm.local_position();
         pkt.rotation = pm.local_rotation();
         pkt.health = pm.local_health();
-        pkt.max_health = pm.local_health(); // TODO: separate max_health accessor
-        pkt.animation_id = 0;
-        pkt.anim_blend = 0.0f;
+        pkt.max_health = pm.local_max_health();
         pkt.movement_flags = 0;
+
+        // Read current animation state from player actor memory
+        if (is_valid_ptr(rt.player_actor_ptr)) {
+            pkt.animation_id = read_mem<uint32_t>(rt.player_actor_ptr, offsets::Player::ANIM_STATE);
+            pkt.anim_blend = read_mem<float>(rt.player_actor_ptr, offsets::Player::ANIM_BLEND);
+        }
+
         session.send_packet(pkt);
     }
 
@@ -190,11 +196,8 @@ void PlayerSync::on_remote_combat(const uint8_t* data, size_t size) {
                              1.0f, 0.0f);
     }
 
-    // If we're the host, apply damage to the target enemy
-    if (Session::instance().is_host() && pkt->target_entity_id != 0) {
-        EnemySync::instance().report_damage(pkt->target_entity_id, 0.0f);
-        spdlog::debug("Host: remote player attacked enemy {}", pkt->target_entity_id);
-    }
+    // Damage is handled by the damage_calc_detour hook when the companion entity
+    // attacks an enemy. No need to send a redundant 0-damage report here.
 }
 
 void PlayerSync::on_remote_full_state(const uint8_t* data, size_t size) {

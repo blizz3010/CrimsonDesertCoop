@@ -82,8 +82,7 @@ Quat PlayerManager::local_rotation() const {
             offsets::Player::POS_OWNER_TO_STRUCT
         });
         if (is_valid_ptr(pos_struct)) {
-            // Position is at +0x90, rotation likely at +0xA0 (16 bytes later)
-            return read_mem<Quat>(pos_struct, offsets::Player::POS_STRUCT_X + 0x10);
+            return read_mem<Quat>(pos_struct, offsets::Player::ROTATION_QUAT);
         }
     }
     return {0, 0, 0, 1};
@@ -91,12 +90,19 @@ Quat PlayerManager::local_rotation() const {
 
 float PlayerManager::local_health() const {
     if (local_player_ == 0) return 0;
-    // Health is accessed via the stat entry system.
-    // The stats component is at actor + 0x58, entries are 16 bytes each.
-    // Health is stat type 0, stored as int64 * 1000.
     auto& rt = get_runtime_offsets();
     if (rt.player_stats_component != 0) {
         int64_t raw = read_mem<int64_t>(rt.player_stats_component, StatEntry::CURRENT_VALUE);
+        return static_cast<float>(raw) / 1000.0f;
+    }
+    return 0;
+}
+
+float PlayerManager::local_max_health() const {
+    if (local_player_ == 0) return 0;
+    auto& rt = get_runtime_offsets();
+    if (rt.player_stats_component != 0) {
+        int64_t raw = read_mem<int64_t>(rt.player_stats_component, StatEntry::MAX_VALUE);
         return static_cast<float>(raw) / 1000.0f;
     }
     return 0;
