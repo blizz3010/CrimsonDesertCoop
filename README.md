@@ -70,11 +70,11 @@ cmake --build build --config Release
 
 ### Recommended: Using CDUMM (Crimson Desert Ultimate Mods Manager)
 
-This mod works best with [CDUMM - Crimson Desert Ultimate Mods Manager](https://www.nexusmods.com/crimsondesert/mods/207), which handles ASI loader setup and mod conflict detection automatically.
+This mod works best with [JSON Mod Manager]([https://www.nexusmods.com/crimsondesert/mods/207](https://www.nexusmods.com/crimsondesert/mods/113)), which handles ASI loader setup and mod conflict detection automatically.
 
-1. Install **CDUMM** following its instructions
-2. Place `CrimsonDesertCoop.asi` and `cdcoop_config.json` into CDUMM's `mods/` folder
-3. Launch the game through CDUMM
+1. Install **JSON Mod Manager** following its instructions
+2. Place `CrimsonDesertCoop.asi` and `cdcoop_config.json` into JSON Mod Manager's `mods/` folder
+3. Launch the game through JSON Mod Manager
 
 ### Manual Installation
 
