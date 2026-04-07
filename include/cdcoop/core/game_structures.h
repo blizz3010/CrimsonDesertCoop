@@ -66,6 +66,12 @@ namespace StatEntry {
     constexpr int32_t HEALTH_ID       = 0;
     constexpr int32_t STAMINA_ID      = 17;
     constexpr int32_t SPIRIT_ID       = 18;
+
+    // Cross-offsets between stat entries (from EquipHide actor_resolve.cpp):
+    // Given the health_entry address, stamina and spirit entries are at fixed offsets.
+    // This allows resolving all three stats from just the health entry pointer.
+    constexpr uint32_t STAMINA_FROM_HEALTH = 0x480; // stamina_entry = health_entry + 0x480
+    constexpr uint32_t SPIRIT_FROM_HEALTH  = 0x510; // spirit_entry  = health_entry + 0x510
 }
 
 // Durability entry structure (from CrimsonDesert-player-status-modifier)
@@ -144,6 +150,10 @@ namespace offsets {
     // =========================================================================
     namespace PlayerBase {
         constexpr uint32_t STATIC_RVA     = 0x05CC7618; // CrimsonDesert.exe+5CC7618 (v1.01.03)
+
+        // Alternative base: pa::ClientActorManager (from bbfox0703 CT disassembly)
+        // This is a different static pointer that also reaches the actor system.
+        constexpr uint32_t CLIENT_ACTOR_MGR_RVA = 0x05CFE230; // CrimsonDesert.exe+5CFE230
 
         // Common chain prefix from base to character body:
         // [base+0x18] -> +0xA0 -> +0xD0 -> {character_slot}
@@ -348,39 +358,73 @@ namespace offsets {
         // health at +0x08, stamina at +0x488, spirit at +0x518
         // (relative to the captured mount stats component base)
 
-        // Dragon mount HP is reportedly difficult to find - community
-        // reports it may not use standard StatEntry format, or may use
-        // a different data type (float vs int). Status: UNRESOLVED.
+        // Horse HP pointer chains (from bbfox0703 CT, v1.01.03):
+        // Via Play_Base2_addr:
+        //   +0x18 -> +0xA0 -> +0xD0 -> +0x68 -> +0x420 -> +0x18 -> +0x58 -> +0x8 (HP)
+        //   Same chain -> +0x488 (Stamina)
+        // IMPORTANT: Horse pointer only resolves while mounted.
 
-        // Dragon timer offset (from community CT research):
-        // During dragon entity access, r13+0x160 holds the flight/ability timer as a float.
-        // Hook point AOB still needed to capture r13 at the right moment.
-        constexpr uint32_t DRAGON_TIMER_OFFSET = 0x160; // float, at r13+0x160 during dragon entity access
+        // ---- Dragon Mount Resolution (from EquipHide/CrimsonDesertTools) ----
+        // Static base RVA for mounted dragon entity resolution:
+        constexpr uint32_t DRAGON_BASE_RVA    = 0x05D613B8; // RVA to dragon mount base pointer
+
+        // Dragon marker primary pointer chain (from base):
+        //   [base+0x150] -> [+0x8] -> [+0x68] -> [+0x20] = dragon marker
+        constexpr uint32_t DRAGON_PRI_STEP_0  = 0x150;
+        constexpr uint32_t DRAGON_PRI_STEP_1  = 0x08;
+        constexpr uint32_t DRAGON_PRI_STEP_2  = 0x68;
+        constexpr uint32_t DRAGON_PRI_STEP_3  = 0x20;
+
+        // Dragon marker secondary pointer chain (fallback):
+        //   [base+0xA0] -> [+0x8] -> [+0x78] -> [+0x0] = dragon marker
+        constexpr uint32_t DRAGON_SEC_STEP_0  = 0xA0;
+        constexpr uint32_t DRAGON_SEC_STEP_1  = 0x08;
+        constexpr uint32_t DRAGON_SEC_STEP_2  = 0x78;
+        constexpr uint32_t DRAGON_SEC_STEP_3  = 0x00;
+
+        // Mount health/stamina resolve thresholds (from EquipHide):
+        // Used to distinguish mount stat entries from player stat entries
+        constexpr int64_t HEALTH_RESOLVE_MIN  = 2500000;  // Min mount HP to be valid
+        constexpr int64_t STAMINA_RESOLVE_MIN = 300000;   // Min mount stamina to be valid
+
+        // Dragon timer offset (from bbfox0703 CT):
+        // During dragon entity access, r13+0x160 holds the flight/ability timer.
+        // AOB: ?? 89 ?? 60 01 00 00 ?? 8B ?? ?? F2 0F
+        // Injection at CrimsonDesert.exe+339D8CB
+        constexpr uint32_t DRAGON_TIMER_RVA   = 0x339D8CB; // Injection point for dragon timer
+        constexpr uint32_t DRAGON_TIMER_OFFSET = 0x160;     // float, at r13+0x160
 
         // Dragon HP is confirmed to be float type, not int64*1000 like player/horse stats.
-        // This explains why standard 4-byte/8-byte CE scans fail to find it.
-        constexpr uint32_t DRAGON_HP_IS_FLOAT = 1; // dragon HP is float type, not int64*1000
+        constexpr uint32_t DRAGON_HP_IS_FLOAT = 1;
     }
 
     // =========================================================================
-    // Resistance attributes (from bbfox0703 CT feature #24 "Get resistant attrs")
-    // The CT includes a feature to locate resistance attributes, but the
-    // exact struct layout and offsets are embedded in CT script logic.
-    // Status: Feature exists in CT but offsets need extraction from the
-    //         CT's Lua scripts. Likely accessed via actor stats component.
+    // Resistance attributes (extracted from bbfox0703 CT v1.0.6 Lua scripts)
+    // Base address captured dynamically via [r14+18] at injection point.
+    // Attribute struct is indexed by rcx * 0x20 (shl rcx, 5), stride = 0x20.
+    // Each entry is 8 bytes (int64, same scale as stats: value * 1000).
+    // Injection point: CrimsonDesert.exe+12D1DFC
+    // AOB: ?? 8B ?? 18 ?? C1 ?? 05 ?? 8B ?? 01 ?? 89 ??
+    // Value scale: 50,000,000 = level 1, 100,000,000 = level 2, ... 750,000,000 = level 15
     // =========================================================================
     namespace ResistanceAttrs {
-        // TODO: Extract exact offsets from bbfox0703 CT Lua scripts
-        // The resistance system likely uses the same stats component base
-        // (actor + 0x58) with resistance entries at higher offsets.
-        // Placeholder - needs verification with ReClass.NET or CE:
-        constexpr uint32_t PLACEHOLDER    = 0x00;  // Needs extraction from CT
+        constexpr uint32_t INJECTION_RVA  = 0x12D1DFC; // Hook point for attribute access
+        constexpr uint32_t STRIDE         = 0x20;      // Bytes per attribute entry (shl rcx, 5)
+        constexpr uint32_t ATK            = 0x000;     // int64 - Attack power
+        constexpr uint32_t DEF            = 0x020;     // int64 - Defence
+        constexpr uint32_t COLD_RESIST    = 0x340;     // int64 - Cold resistance
+        constexpr uint32_t FIRE_RESIST    = 0x360;     // int64 - Fire resistance
+        constexpr uint32_t LIGHTNING_RESIST= 0x3A0;    // int64 - Lightning resistance
+        constexpr int64_t  LEVEL_SCALE    = 50000000;  // Per-level scale (50M per level, max 15)
     }
 
     namespace Enemy {
         // Enemies use the same actor base. Stats use the same StatEntry format.
         constexpr uint32_t AGGRO_TARGET   = 0x150;  // ptr - current aggro target actor
         constexpr uint32_t STATE          = 0x158;  // uint32_t - AI state enum
+
+        // Battle damage return address (from EquipHide, for damage hook validation):
+        constexpr uint32_t BATTLE_DAMAGE_RET_RVA = 0x1A50BB0; // Return address for battle damage path
     }
 
     namespace World {
@@ -508,28 +552,39 @@ namespace signatures {
     constexpr int COMBAT_FLAG_RIP_END = 7;       // displacement is 4 bytes (3+4=7)
     constexpr uint32_t COMBAT_FLAG_BYTE = 0x1A;  // offset within resolved struct
 
-    // --- WorldSystem Resolution (from EquipHide) ---
-    // Resolves the WorldSystem singleton via RIP-relative addressing
+    // --- WorldSystem Resolution (from EquipHide, verified patterns) ---
+    // Resolves the WorldSystem singleton via RIP-relative addressing.
+    // Patterns updated to match EquipHide's proven AOBs (priority order: P1 most precise).
     constexpr const char* WORLD_SYSTEM_P1 =
-        "48 83 EC 28 48 8B 0D ? ? ? ? 48 8B 49 50 E8 ? ? ? ? 84 C0 0F 94 C0 48 83 C4 28 C3";
+        "48 83 EC 28 48 8B 0D ? ? ? ? 48 8B 49 ? E8 ? ? ? ? 84 C0 0F 94 C0 48 83 C4 28 C3";
     constexpr int WORLD_SYSTEM_P1_RIP_OFFSET = 7;
     constexpr int WORLD_SYSTEM_P1_RIP_END = 11;
 
     constexpr const char* WORLD_SYSTEM_P2 =
-        "80 B8 49 01 00 00 00 75 ? 48 8B 05 ? ? ? ? 48 8B 88 D8 00 00 00";
+        "80 B8 ? ? ? ? 00 75 ? 48 8B 05 ? ? ? ? 48 8B 88 ? ? ? ?";
     constexpr int WORLD_SYSTEM_P2_RIP_OFFSET = 12;
     constexpr int WORLD_SYSTEM_P2_RIP_END = 16;
 
     constexpr const char* WORLD_SYSTEM_P3 =
-        "48 8B 0D ? ? ? ? 48 8B 49 50 E8 ? ? ? ? 84 C0 0F 94 C0";
+        "48 8B 0D ? ? ? ? 48 8B 49 ? E8 ? ? ? ? 84 C0 0F 94 C0";
     constexpr int WORLD_SYSTEM_P3_RIP_OFFSET = 3;
     constexpr int WORLD_SYSTEM_P3_RIP_END = 7;
 
-    // --- ChildActor Vtable Resolution (from EquipHide) ---
+    // --- ChildActor Vtable Resolution (from EquipHide, 3 fallback patterns) ---
     constexpr const char* CHILD_ACTOR_VTBL_P1 =
-        "48 8B 55 08 48 89 F1 E8 ? ? ? ? 90 48 8D 05 ? ? ? ? 48 89 06 EB ?";
+        "48 8B 55 ? 48 89 F1 E8 ? ? ? ? 90 48 8D 05 ? ? ? ? 48 89 06 EB ?";
     constexpr int CHILD_ACTOR_VTBL_P1_RIP_OFFSET = 16;
     constexpr int CHILD_ACTOR_VTBL_P1_RIP_END = 20;
+
+    constexpr const char* CHILD_ACTOR_VTBL_P2 =
+        "48 89 F1 E8 ? ? ? ? 90 48 8D 05 ? ? ? ? 48 89 06 EB ? 4C";
+    constexpr int CHILD_ACTOR_VTBL_P2_RIP_OFFSET = 12;
+    constexpr int CHILD_ACTOR_VTBL_P2_RIP_END = 16;
+
+    constexpr const char* CHILD_ACTOR_VTBL_P3 =
+        "45 31 ED 48 85 F6 74 ? 48 8B 55 ? 48 89 F1 E8 ? ? ? ? 90 48 8D 05";
+    constexpr int CHILD_ACTOR_VTBL_P3_RIP_OFFSET = 24;
+    constexpr int CHILD_ACTOR_VTBL_P3_RIP_END = 28;
 
     // --- PartInOut transition (equipment visibility, from EquipHide) ---
     constexpr const char* PART_INOUT_P1 =
@@ -676,9 +731,42 @@ namespace signatures {
         "48 C1 E2 04 48 03 90 18 01 00 00 45 84 ED 74 ?? 80 BA 8B 00 00 00 00 74 ?? 8B 42 04 44 0F A3 F0 73 ??";
 
     // Injection point pattern for resistance attribute modification.
-    // Struct layout TBD - offsets within the resistance entry still need extraction.
+    // At injection: [r14+18] = resistance base, rcx * 0x20 = attribute index
     constexpr const char* RESIST_ATTRS_INJECTION =
-        "?? 8B ?? 10 ?? 63 ?? ?? ?? ?? ?? ?? 3B ?? 7F ?? ?? 63 ?? ?? ?? ?? ?? ?? 3B ?? 7E ??";
+        "?? 8B ?? 18 ?? C1 ?? 05 ?? 8B ?? 01 ?? 89 ??";
+    constexpr int RESIST_ATTRS_INJECTION_RIP_OFFSET = 0; // Direct register capture, not RIP-relative
+
+    // --- Dragon Timer (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+339D8CB
+    // Instruction: mov [r13+00000160],eax (writes dragon mount timer)
+    // r13 = dragon/mount combat data struct
+    constexpr const char* DRAGON_TIMER =
+        "?? 89 ?? 60 01 00 00 ?? 8B ?? ?? F2 0F";
+
+    // --- Mounted Dragon Marker Resolution (from EquipHide) ---
+    // Uses static base at CrimsonDesert.exe+5D613B8 with pointer chain resolution.
+    // No AOB needed - resolved via RVA + pointer chain dereference.
+
+    // --- Fast Enemy Kill (from bbfox0703 CT, game v1.01.03) ---
+    // Hook for modifying enemy HP writes during combat
+    // Injection at CrimsonDesert.exe+C456059
+    constexpr const char* FAST_ENEMY_KILL =
+        "?? 89 ?? 24 08 ?? 0F 4C ?? 66 ?? 89 ?? 24 50";
+
+    // --- Friendship Write (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+14F639E: fast friendship gain
+    constexpr const char* FAST_FRIENDSHIP =
+        "?? 8B ?? 10 ?? 63 ?? ?? ?? ?? ?? ?? 3B ?? 7F";
+
+    // --- Infinite Arrows / Consumables (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+1D3992A: prevents consumable count decrease
+    constexpr const char* INF_ARROW =
+        "?? 83 ?? 10 00 7E ?? ?? 8D ?? 08 66 ?? FF ??";
+
+    // --- Item Remove No-Decrease (from bbfox0703 CT, game v1.01.03) ---
+    // Injection at CrimsonDesert.exe+1ABCA25: prevents item removal
+    constexpr const char* ITEM_REMOVE_NO_DEC =
+        "?? 29 ?? 07 10 ?? 8B ?? ?? 03 ?? ?? FF FF 00 00";
 }
 
 // =========================================================================
