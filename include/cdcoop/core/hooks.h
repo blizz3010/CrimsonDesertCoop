@@ -93,9 +93,8 @@ void __cdecl world_state_detour(void* world_obj, uint32_t state_id, uint32_t new
 inline SafetyHookInline camera_hook;
 void __cdecl camera_detour(void* camera, void* target_transform);
 
-// Game tick / update hook - main sync point
-inline SafetyHookInline game_tick_hook;
-void __cdecl game_tick_detour(void* game_instance, float delta_time);
+// NOTE: Game tick is driven by the DX12 Present hook (imgui_impl_dx12.cpp),
+// which calls sync systems directly each frame. No dedicated game tick hook needed.
 
 } // namespace hooks
 

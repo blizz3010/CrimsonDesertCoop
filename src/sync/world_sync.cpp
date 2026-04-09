@@ -84,55 +84,38 @@ void WorldSync::on_remote_interact(const uint8_t* data, size_t size) {
     if (size < sizeof(WorldInteractPacket)) return;
     auto* pkt = reinterpret_cast<const WorldInteractPacket*>(data);
 
-    spdlog::debug("Remote world interact: obj={}, type={}, state={}",
-                   pkt->object_id, pkt->interaction_type, pkt->new_state);
+    spdlog::warn("World interact received but not applied (stub): obj={}, type={}, state={}",
+                  pkt->object_id, pkt->interaction_type, pkt->new_state);
 
-    // World state changes are forwarded as events. The object_id is the
-    // lower 32 bits of the world object pointer. Since both players share
-    // the same game world, the same objects exist at the same addresses.
-    //
-    // World objects (doors, chests, levers) are managed by the WorldSystem.
-    // The MapLookup/MapInsert signatures from EquipHide could resolve objects
-    // by hash, but the world object manager's exact layout needs more RE.
-    //
-    // For now, the event is logged. Both players' games will naturally sync
-    // most world state since they run the same game instance. The main
-    // purpose of this sync is to handle interactions that one player triggers
-    // but the other player's game might not process (e.g., opening a chest
-    // while the other player is far away).
+    // STUB: World object manager layout is unknown. MapLookup/MapInsert sigs
+    // from EquipHide exist but the manager struct needs more RE work.
+    // Both players share the same game world, so most interactions sync
+    // naturally. This handler would cover edge cases where one player
+    // triggers something while the other is out of range.
 }
 
 void WorldSync::on_remote_quest_update(const uint8_t* data, size_t size) {
     if (size < sizeof(WorldInteractPacket)) return;
     auto* pkt = reinterpret_cast<const WorldInteractPacket*>(data);
 
-    spdlog::info("Remote quest update: quest {} -> stage {}",
+    spdlog::warn("Quest update received but not applied (stub): quest {} -> stage {}",
                   pkt->object_id, pkt->new_state);
 
-    // Quest state sync is event-based. The host broadcasts quest stage changes
-    // so the client tracks progression. Since both players run the same game
-    // instance, quest state naturally stays in sync for most cases.
-    // This packet handles edge cases where quest triggers are player-proximity-based
-    // and only one player is in range.
-    //
-    // The quest system likely lives under WorldSystem as a subsystem,
-    // accessible via a similar chain to ActorManager. The MapLookup sig from
-    // EquipHide's indexed string table could be used to find quest entries by ID.
+    // STUB: Quest manager pointer not yet found. The quest system likely lives
+    // under WorldSystem as a subsystem. Quest state mostly syncs naturally
+    // since both players share the same game world.
 }
 
 void WorldSync::on_remote_cutscene(const uint8_t* data, size_t size) {
     if (size < sizeof(WorldInteractPacket)) return;
     auto* pkt = reinterpret_cast<const WorldInteractPacket*>(data);
 
-    spdlog::info("Remote cutscene trigger: {}", pkt->object_id);
+    spdlog::warn("Cutscene trigger received but not applied (stub): {}",
+                  pkt->object_id);
 
-    // Cutscene sync ensures both players enter the same cutscene simultaneously.
-    // Since both players share the same game world, cutscenes triggered by the
-    // host's game progression will play for both. This packet handles cases where
-    // player 2 is far from the trigger zone.
-    //
-    // The cutscene system is likely a WorldSystem subsystem. PAZ archive data
-    // (from the unpacker) could reveal cutscene trigger definitions.
+    // STUB: Cutscene manager not yet found. Cutscenes triggered by the host's
+    // progression play for both players since they share the same game world.
+    // This handler would cover cases where Player 2 is far from the trigger zone.
 }
 
 } // namespace cdcoop

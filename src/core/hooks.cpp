@@ -103,13 +103,19 @@ bool HookManager::initialize() {
         hooks_failed++;
     }
 
-    // --- Game tick: use DX12 Present as the frame tick ---
-    // No dedicated game tick signature has been found for the BlackSpace Engine.
-    // Instead, the DX12 Present hook (installed by Overlay) fires once per frame
-    // and serves as our sync tick. The game_tick_detour is wired into the
-    // Present callback via Overlay::render() -> game_tick_detour.
-    // This is a common approach used by many game mods.
+    // --- Game tick: DX12 Present hook drives the update loop ---
+    // No dedicated game tick signature exists for the BlackSpace Engine.
+    // The DX12 Present hook (installed by Overlay in imgui_impl_dx12.cpp) fires
+    // once per frame and calls sync systems (Session, PlayerSync, EnemySync,
+    // WorldSync, PlayerManager) directly with accurate delta_time.
     spdlog::info("Game tick: using DX12 Present hook as frame tick (no dedicated sig needed)");
+
+    // --- Hooks NOT yet installed (awaiting verified signatures) ---
+    // player_animation_hook: Animation state offsets 0x120/0x124 are estimated,
+    //   not verified. No animation write signature found yet. Animation sync
+    //   currently relies on 5Hz full-state fallback packets.
+    // companion_spawn_hook: No companion spawn function signature has been found.
+    //   Companion hijack currently scans body slots at session start instead.
 
     // --- Camera Zoom/FOV hook (from Send's CE table, game v1.00.03) ---
     // Hooks the instruction: movss [r12+0xD8], xmm0
@@ -142,7 +148,6 @@ void HookManager::shutdown() {
     if (!initialized_) return;
 
     // SafetyHook automatically restores original code when hooks are destroyed
-    hooks::game_tick_hook = {};
     hooks::player_position_hook = {};
     hooks::player_animation_hook = {};
     hooks::damage_calc_hook = {};
@@ -319,12 +324,6 @@ bool HookManager::resolve_player_base() {
 // =========================================================================
 
 namespace hooks {
-
-// NOTE: game_tick_detour is no longer used. The core update loop (session polling,
-// sync updates, hotkey processing) is now driven by the DX12 Present hook in
-// imgui_impl_dx12.cpp, which fires every frame with accurate delta_time.
-// The game_tick_hook inline hook was never installed because no dedicated game tick
-// signature exists for the BlackSpace Engine.
 
 void __cdecl player_position_detour(void* player, float x, float y, float z) {
     // Call original
