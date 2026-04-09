@@ -18,6 +18,8 @@ void AnimationSync::initialize() {
     // anim ID from the remote player, which works when both players
     // use the same character model.
     spdlog::info("AnimationSync: using passthrough mode (real anim IDs not yet extracted from PAZ)");
+    spdlog::warn("AnimationSync: player_animation_hook is NOT installed - animation updates are "
+                 "only sent via 5Hz full state packets. Remote player animations may appear choppy.");
 }
 
 void AnimationSync::shutdown() {

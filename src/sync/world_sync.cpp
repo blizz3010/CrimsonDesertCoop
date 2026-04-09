@@ -63,7 +63,7 @@ void WorldSync::on_quest_update(uint32_t quest_id, uint32_t stage) {
     pkt.new_state = stage;
 
     Session::instance().send_packet(pkt, true);
-    spdlog::info("Quest update synced: quest {} -> stage {}", quest_id, stage);
+    spdlog::warn("Quest update sent but receive-side is stub-only: quest {} -> stage {}", quest_id, stage);
 }
 
 void WorldSync::on_cutscene_trigger(uint32_t cutscene_id) {
@@ -75,7 +75,7 @@ void WorldSync::on_cutscene_trigger(uint32_t cutscene_id) {
     pkt.object_id = cutscene_id;
 
     Session::instance().send_packet(pkt, true);
-    spdlog::info("Cutscene triggered: {}", cutscene_id);
+    spdlog::warn("Cutscene trigger sent but receive-side is stub-only: {}", cutscene_id);
 }
 
 // --- Private ---
