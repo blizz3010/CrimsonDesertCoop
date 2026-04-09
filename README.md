@@ -40,7 +40,7 @@ These are features that are **not yet working** and require reverse engineering 
 
 | Feature | Status | What's Blocking It |
 |---------|--------|--------------------|
-| Animation sync (cross-model) | Passthrough only | Real animation IDs need to be extracted from PAZ archives. Works fine when both players use the same character model |
+| Animation sync (cross-model) | Passthrough only | Animation system uses .paac action charts, not simple memory offsets. IDs need PAZ extraction. Works when both players use the same character model |
 | Quest sync | Not implemented | Quest manager pointer not found within WorldSystem |
 | Cutscene sync | Not implemented | Cutscene manager/trigger function not found |
 | World interaction sync | Event logging only | World object manager layout unknown |
@@ -199,21 +199,21 @@ These are the remaining offsets/systems needed. **If you have access to any of t
 
 | # | Priority | System | What We Need | Status |
 |---|----------|--------|--------------|--------|
-| 1 | **HIGH** | Animation State | Verify offsets 0x120 (anim ID) and 0x124 (blend weight) on actor base with ReClass.NET | Estimated - needs verification |
-| 2 | **HIGH** | Animation IDs | Extract real animation ID table from PAZ archives for cross-model remapping | Passthrough mode for MVP |
+| 1 | **HIGH** | Animation System | Animation runs via .paac action charts, not simple actor offsets. Offsets 0x120/0x124 may not be correct. See [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) research | Estimated - likely wrong approach |
+| 2 | **HIGH** | Animation IDs | Extract animation paths from .paac files (428 .paa refs in sword_upper.paac alone). CDAnimCancel has `extract_paac.py` parser | Passthrough mode for MVP |
 | 3 | **MEDIUM** | Quest Manager | Find quest manager pointer within WorldSystem or a nearby singleton | Not started |
 | 4 | **MEDIUM** | Cutscene Manager | Find the function/manager that triggers cutscenes | Not started |
 | 5 | **MEDIUM** | Camera State | Map camera struct beyond zoom (+0xD8) - position, rotation, target | Partial (zoom only) |
 | 6 | **MEDIUM** | Dragon HP | Dragon mount health offset (confirmed float type, not int64*1000) | Unresolved |
 | 7 | **LOW** | World Objects | Find manager for doors, chests, interactive world objects | Not started |
 | 8 | **LOW** | Teleport System | Hook fast travel to sync both players to same destination | Not started |
-| 9 | **LOW** | Combat Flags | Verify isAttacking (0x130) and isDodging (0x131) on actor base | Estimated |
+| 9 | **LOW** | Combat Flags | Per-action flags at actor+0x130/0x131 are unverified by entire community. CDAnimCancel found evaluator flag at `[rbx+0x6A]` but that's on evaluator struct, not actor | Estimated |
 
 #### Where to Look
 
-- **Animation**: Attach ReClass to actor base, trigger animations, watch for changing uint32/float at +0x120. Use [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpacker) and [CrimsonForge](https://www.nexusmods.com/crimsondesert/mods/446) for PAZ animation extraction
-- **Quest/Cutscene**: WorldSystem (+0x30 = ActorManager) likely has sibling pointers to other managers. [NattKh Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) has 633 quests / 5,450 missions. [JustSkip](https://github.com/wealdly/JustSkip) hooks the cutscene system
-- **Dragon HP**: FearLess pages 14-16 discuss this. Community tried 4-byte, float, ALL value types without success. May use a separate entity pool from ground mounts
+- **Animation**: The animation system uses **.paac action chart files**, not simple actor struct fields. [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) has a `extract_paac.py` parser and found the evaluator function at `CrimsonDesert.exe+2712090` (AOB: `0F 28 CE 48 89 4C 24 20 48 8B CB E8`). [CrimsonForge](https://www.nexusmods.com/crimsondesert/mods/446) can extract .paa animation files from PAZ
+- **Quest/Cutscene**: WorldSystem (+0x30 = ActorManager) likely has sibling pointers to other managers. Scan +0x38, +0x40, +0x48 etc. [NattKh Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) has 633 quests / 5,450 missions for validation. CDAnimCancel found InputBlock RTTI at `0x144AFCC70` handles "menu/cutscene blocking" - possible lead
+- **Dragon HP**: Confirmed float type. Orcax mod uses dynamic root scanning (offsets 0x08-0x200, step sizeof(ptr)) with threshold comparison (max > 2.5M). Try same approach with float comparison for dragon
 - **Camera**: [UltimateCameraMod](https://github.com/FitzDegenhub/UltimateCameraMod) has 150+ camera states in `playercamerapreset.xml`. Try ReClass on the camera struct pointer (captured via r12 in zoom hook)
 
 ### Resources (Bot-Protected / Auth-Gated)
@@ -259,6 +259,7 @@ These pages require manual human access (403 for automated tools). **If you can 
 ### Related Projects & Offset Sources
 
 - [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Stats, position, damage, durability signatures (ASI mod, safetyhook)
+- [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) - **Animation system RE**: .paac format parser, evaluator function AOBs, action chart structure (April 2026)
 - [JustSkip](https://github.com/wealdly/JustSkip) - Combat state flag AOB and RIP-relative resolver
 - [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework used by CD mods

@@ -20,8 +20,8 @@ This document explains how to find the memory offsets and function signatures ne
 | Dragon timer | **Verified** | r13+0x160 float |
 | Mount HP (horse) | **Verified** | Dynamic capture (pointer only valid while mounted) |
 | 40+ AOB signatures | **Verified** | Primary/fallback patterns |
-| Animation state | **Estimated** | 0x120 / 0x124 - needs ReClass verification |
-| Combat flags (per-action) | **Estimated** | 0x130 / 0x131 - needs verification |
+| Animation state | **Likely wrong** | 0x120 / 0x124 estimated, but CDAnimCancel shows animation runs via .paac action charts, not simple actor fields |
+| Combat flags (per-action) | **Estimated** | 0x130 / 0x131 - CDAnimCancel found evaluator flag at `[rbx+0x6A]` but on evaluator struct, not actor base |
 | Quest manager | **Missing** | Not found |
 | Cutscene manager | **Missing** | Not found |
 | Full camera struct | **Missing** | Only zoom at +0xD8; rest is PAZ XML-controlled |
@@ -86,13 +86,14 @@ Stats Component (+0x58):
 +0x518 int64    Spirit current (VERIFIED)
 +0x528 int64    Spirit max (VERIFIED)
 
-Animation (ESTIMATED - needs verification):
-+0x120 uint32   Animation state ID
-+0x124 float    Blend weight
-+0x130 bool     IsAttacking
-+0x131 bool     IsDodging
-+0x134 uint32   WeaponId
-+0x140 float    MovementSpeed
+Animation (ESTIMATED - likely incorrect approach):
++0x120 uint32   Animation state ID (estimated, but CDAnimCancel research shows
+                 animation runs via .paac action charts, not simple actor fields)
++0x124 float    Blend weight (estimated)
++0x130 bool     IsAttacking (estimated, unverified by entire community)
++0x131 bool     IsDodging (estimated)
++0x134 uint32   WeaponId (estimated)
++0x140 float    MovementSpeed (estimated)
 ```
 
 ## Step 2: Find the Companion System
@@ -227,6 +228,9 @@ Player = CrimsonDesert.exe+5CC7618
 ```
 Chain: `[base+0x18] -> +0xA0 -> +0xD0 -> {character_slot} -> +0x20 -> +0x18 -> +0x58 -> {stat}`
 
+### Stamina/Spirit Offset Note
+The Orcax player-status-modifier source defines `kStaminaEntryOffsetFromHealth = 0x480` and `kSpiritEntryOffsetFromHealth = 0x510`. Our code uses `+0x488` and `+0x518` from the stats component base. The 8-byte difference is because Orcax measures from the health entry pointer (root+0x58+0x08 = the current value field), while our offsets measure from the stats component root (root+0x58). Both are correct in their respective reference frames.
+
 ### Reputation System (from bbfox0703 CT, v1.01.03)
 Fully integrated in `game_structures.h`:
 - Gain setter at `CrimsonDesert.exe+1B4C98E`
@@ -250,6 +254,17 @@ movss [r12+0xD8], xmm0    ; F3 41 0F 11 84 24 D8 00 00 00
 See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full list of 40+ patterns.
 
 ## New Leads from Community Research (April 2026)
+
+### CDAnimCancel / Guard Cancel (Animation System RE)
+**GitHub**: https://github.com/faisalkindi/CDAnimCancel
+- **Critical finding**: The animation system uses **.paac action chart files** (PA Action Chart binary), NOT simple actor struct fields. Memory scanning for animation state offsets was "unsuccessful -- state hidden behind unknown pointers"
+- **Evaluator function**: `CrimsonDesert.exe+2712090` - gate that returns 0/1 for animation transitions. AOB: `0F 28 CE 48 89 4C 24 20 48 8B CB E8`
+- **Guard activation**: Entry at `+2712330`, AOB: `48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 41 54 41 55 41 56 41 57 48 83 EC 60`
+- **Candidate array struct**: `[rbx+0x40]` = array ptr, `[rbx+0x48]` = count, `[rbx+0x68]` = current state, `[rbx+0x6A]` = active flag (0x01)
+- **Each transition candidate**: 0xD0 (208) bytes
+- **Includes `extract_paac.py`**: 1,368-line binary format decoder for .paac files (428 animation .paa paths in sword_upper.paac alone)
+- **Implication**: Our estimated actor+0x120/0x124 animation offsets are likely the wrong approach. Real animation state lives in deserialized .paac runtime objects
+- **Themida note**: CRC protection reverts executable code patches silently. Only system DLL hooks and SafetyHook work
 
 ### bbfox0703 Cheat Table (Open Source, 220+ entries)
 **GitHub**: https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables/blob/main/Crimson%20Desert/CrimsonDesert.CT
@@ -277,7 +292,8 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full 
 ## Community Resources
 
 - [CrimsonDesert-player-status-modifier](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier) - Player stats, position, damage hooks
-- [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
+- [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) - Animation system RE, .paac format parser, evaluator AOBs
+- [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility (v0.5.1, April 8 2026)
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework
 - [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Address value table
 - [JustSkip](https://github.com/wealdly/JustSkip) - Combat state flag, cutscene skip hooks
