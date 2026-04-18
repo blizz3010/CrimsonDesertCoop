@@ -72,6 +72,7 @@ add_library(cdcoop_core STATIC
     src/sync/player_sync.cpp
     src/sync/enemy_sync.cpp
     src/sync/world_sync.cpp
+    src/sync/mount_sync.cpp
     src/sync/animation_sync.cpp
 
     src/player/companion_hijack.cpp

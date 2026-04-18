@@ -13,6 +13,7 @@
 #include <cdcoop/sync/player_sync.h>
 #include <cdcoop/sync/enemy_sync.h>
 #include <cdcoop/sync/world_sync.h>
+#include <cdcoop/sync/mount_sync.h>
 #include <cdcoop/player/companion_hijack.h>
 #include <cdcoop/player/player_manager.h>
 #include <cdcoop/sync/animation_sync.h>
@@ -70,6 +71,7 @@ void mod_main() {
         cdcoop::PlayerSync::instance().initialize();
         cdcoop::EnemySync::instance().initialize();
         cdcoop::WorldSync::instance().initialize();
+        cdcoop::MountSync::instance().initialize();
         cdcoop::AnimationSync::instance().initialize();
         spdlog::info("Sync systems initialized");
 
@@ -102,6 +104,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
         spdlog::info("CrimsonDesertCoop shutting down...");
         cdcoop::Overlay::instance().shutdown();
         cdcoop::CompanionHijack::instance().shutdown();
+        cdcoop::MountSync::instance().shutdown();
         cdcoop::WorldSync::instance().shutdown();
         cdcoop::EnemySync::instance().shutdown();
         cdcoop::PlayerSync::instance().shutdown();

@@ -170,6 +170,31 @@ bool HookManager::initialize() {
         }
     }
 
+    // --- Mount pointer capture mid-hook (opt-in) ---
+    // Hook offset +20 inside MOUNT_PTR_CAPTURE places us right before
+    // `mov rax, [rdi+0x68]` — rdi is the mount entity this-pointer.
+    // MountSync polls HP/stamina off this capture once per tick.
+    if (cfg.sync_mount_state) {
+        auto sig = sig_scan(signatures::MOUNT_PTR_CAPTURE, "MountPtrCapture");
+        if (sig) {
+            uintptr_t target = sig.address + signatures::MOUNT_PTR_CAPTURE_OFFSET;
+            if (create_mid_hook(target, hooks::mount_ptr_capture_detour,
+                                hooks::mount_ptr_capture_hook)) {
+                spdlog::info("Installed MountPtrCapture mid-hook");
+                status_.installed++;
+                status_.installed_names.emplace_back("MountPtrCapture (mid)");
+            } else {
+                spdlog::warn("Failed to install MountPtrCapture hook");
+                status_.failed++;
+                status_.failed_names.emplace_back("MountPtrCapture");
+            }
+        } else {
+            spdlog::warn("MountPtrCapture AOB not found");
+            status_.failed++;
+            status_.failed_names.emplace_back("MountPtrCapture");
+        }
+    }
+
     // --- WorldSystem sibling probe (opt-in) ---
     if (cfg.dump_world_system_probe && get_runtime_offsets().world_system_resolved) {
         scan_world_system_siblings();
@@ -202,6 +227,7 @@ void HookManager::shutdown() {
     hooks::animation_evaluator_hook = {};
     hooks::dragon_hp_probe_hook = {};
     hooks::teleport_waypoint_hook = {};
+    hooks::mount_ptr_capture_hook = {};
 
     initialized_ = false;
     spdlog::info("All hooks removed");
@@ -641,6 +667,22 @@ void teleport_waypoint_detour(SafetyHookContext& ctx) {
 
     spdlog::info("Teleport waypoint captured: type=0x{:X} dest=({},{},{})", type_id, x, y, z);
     WorldSync::instance().on_teleport_trigger({x, y, z}, type_id);
+}
+
+void mount_ptr_capture_detour(SafetyHookContext& ctx) {
+    // At offset +20 of the MOUNT_PTR_CAPTURE AOB, the next instruction
+    // is `mov rax, [rdi+0x68]` — rdi holds the mount entity this-pointer.
+    // The hook fires on every entry to this function while the player
+    // is interacting with a mount; we cache the pointer only when it
+    // changes to avoid log spam.
+    if (!is_valid_ptr(ctx.rdi)) return;
+
+    auto& rt = get_runtime_offsets();
+    if (rt.mount_ptr == ctx.rdi && rt.mount_resolved) return;
+
+    rt.mount_ptr = ctx.rdi;
+    rt.mount_resolved = true;
+    spdlog::info("Mount pointer captured at 0x{:X}", rt.mount_ptr);
 }
 
 } // namespace hooks
