@@ -25,8 +25,9 @@ This document explains how to find the memory offsets and function signatures ne
 | Quest manager | **Missing** | Not found |
 | Cutscene manager | **Missing** | Not found |
 | Full camera struct | **Missing** | Only zoom at +0xD8; rest is PAZ XML-controlled |
-| Dragon HP | **Missing** | Confirmed float type, pointer chain unknown |
+| Dragon HP | **Candidate known** | `+0xD8` in dragon-mount struct (strong float candidate from field map); needs in-game read-back |
 | World object manager | **Missing** | MapLookup/MapInsert sigs exist but manager unknown |
+| Teleport / fast-travel | **Signatures known** | Waypoint-apply AOB at `+0xAB5594`, worldOffset global + entity velocity write — see below |
 
 ## Prerequisites
 
@@ -279,6 +280,33 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full 
 **GitHub**: https://github.com/LukeFZ/pycrimson
 - PAZ/PAMT extraction, DDS decompression, save decrypt/re-encrypt, reflection-based deserializer
 - Could programmatically extract animation data from PAZ archives
+
+### Teleport / fast-travel (bbfox0703 CT, 2026-04-18 research pass)
+See `docs/RESEARCH_2026-04-18.md` for full derivation. Summary:
+
+- **Waypoint-apply hook** at `CrimsonDesert.exe+0xAB5594`
+  - AOB: `F2 41 0F 11 86 D8 00 00 00 ?? ?? ?? ?? 41 89 86 E0 00 00 00`
+  - `r14` = destination entity, `r15` = source waypoint
+  - Entity layout: `+0xD8` = X,Y double; `+0xE0` = Z float
+  - Source layout: `+0x1C` = X,Y double; `+0x24` = Z float
+- **worldOffset global** — entity positions are stored in entity-local
+  space; world pos = local + worldOffset. Resolved via RIP-relative AOB:
+  `0F ?? ?? ?? ?? ?? ?? 0F 11 ?? 90 00 00 00 E8 ?? ?? ?? ?? F3`
+  (pos=3, len=7). Use site at `+0x278C6C8`.
+- **Entity velocity write** at `+0x2791A16` — `movups [entity+0x1B0], xmm1`
+  packed as `{X, Z_height, Y, W}`.
+
+Integrated as `namespace Teleport` in `include/cdcoop/core/game_structures.h`.
+
+### Dragon HP candidate (bbfox0703 CT, 2026-04-18 research pass)
+Reading the surrounding code at the dragon-timer injection site
+(`+0x339D8CB`) produced a contiguous field map for the dragon-mount
+struct at `r13`. `+0xD8` is the only standalone 4-byte float between
+the `+0xC0` coord block and the `+0xE0..+0xEC` stat quad, and is
+written with `xmm8` — same convention as horse HP init. Added as
+`Mount::DRAGON_HP_PREFERRED_OFFSET = 0xD8`; the existing dynamic scan
+still runs as fallback. Needs in-game read-back to confirm it matches
+the visible HP bar.
 
 ### Save Editor Data (NattKh/CRIMSON-DESERT-SAVE-EDITOR)
 - 2,262 item templates, 633 quests, 5,450 missions, 5,500+ knowledge entries
