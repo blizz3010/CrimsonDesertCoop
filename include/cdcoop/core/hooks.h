@@ -137,11 +137,14 @@ inline SafetyHookInline animation_evaluator_hook;
 void __cdecl animation_evaluator_detour(void* evaluator);
 
 // Experimental: Dragon HP probe (piggybacks the existing dragon timer site).
-// On first dragon-mount event, runs dynamic_scan_float over the marker
-// struct and caches the discovered HP offset. Read-only.
+// Mid-hook so we can read r13 directly — at the timer write site
+// (`mov [r13+0x160], reg`), r13 is the dragon mount marker. Inline-hook
+// args (rcx-based) would point at unrelated memory at this mid-function
+// site. On first dragon-mount event, runs dynamic_scan_float over the
+// marker struct and caches the discovered HP offset. Read-only.
 // Gated behind Config::enable_experimental_hooks.
-inline SafetyHookInline dragon_hp_probe_hook;
-void __cdecl dragon_hp_probe_detour(void* dragon_marker);
+inline SafetyHookMid dragon_hp_probe_hook;
+void dragon_hp_probe_detour(SafetyHookContext& ctx);
 
 // Map waypoint / fast-travel apply (mid-hook). Reads r15 (source waypoint
 // struct) at the apply site and broadcasts a TeleportPacket to the peer
