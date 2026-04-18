@@ -85,6 +85,13 @@ public:
     // Resolve the player via static base pointer (from bbfox0703 CT)
     bool resolve_player_base();
 
+    // Resolve the ChildActor vtable address. Populates
+    // RuntimeOffsets::child_actor_vtbl. Used by is_child_actor() to
+    // distinguish child actors (companions, summoned NPCs) from
+    // regular enemies and the player when iterating ActorManager
+    // body slots.
+    bool resolve_child_actor_vtbl();
+
     // Walk WorldSystem+0x30..0x100 as void** and log each non-null vtable
     // to "worldprobe" logger. Runs once per session when
     // Config::dump_world_system_probe is true. Populates RuntimeOffsets

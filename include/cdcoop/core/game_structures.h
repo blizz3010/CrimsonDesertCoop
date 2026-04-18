@@ -1042,4 +1042,15 @@ inline bool is_valid_ptr(uintptr_t addr) {
     return addr >= kMinimumPointerAddress;
 }
 
+// Check whether `entity` is a ChildActor (companion, summoned NPC, etc.)
+// by comparing its vtable pointer against the resolved ChildActor vtable.
+// Returns false if the entity is null, the vtable hasn't been resolved
+// yet, or the vtables don't match. Cheap — single pointer read + compare.
+inline bool is_child_actor(uintptr_t entity) {
+    if (!is_valid_ptr(entity)) return false;
+    auto& rt = get_runtime_offsets();
+    if (rt.child_actor_vtbl == 0) return false;
+    return read_mem<uintptr_t>(entity, 0) == rt.child_actor_vtbl;
+}
+
 } // namespace cdcoop

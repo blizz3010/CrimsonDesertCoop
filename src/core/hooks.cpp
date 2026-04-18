@@ -109,6 +109,12 @@ bool HookManager::initialize() {
         resolve_player_base();
     }
 
+    // --- ChildActor vtable resolution (from EquipHide, 3 fallback sigs) ---
+    // Populates rt.child_actor_vtbl. Used by is_child_actor() to filter
+    // child entities (companions, summons) from regular enemies during
+    // ActorManager body-slot iteration. Best-effort — failure is non-fatal.
+    resolve_child_actor_vtbl();
+
     // --- Player position hook ---
     // r13 = float* position array [X, Y, Z]
     try_hook_pair(signatures::POSITION_PRIMARY, signatures::POSITION_FALLBACK,
@@ -260,6 +266,20 @@ void HookManager::scan_world_system_siblings() {
     constexpr uint32_t kEnd   = 0x100;
     constexpr uint32_t kStep  = 0x08; // pointer-aligned
 
+    // Helper: read a vtable function pointer at index i, return its RVA
+    // within the game module if it lies inside, else 0. Bounded by
+    // VirtualQuery so we never read garbage.
+    auto vfunc_rva = [&](uintptr_t vtable, int i) -> uintptr_t {
+        uintptr_t slot_addr = vtable + static_cast<uintptr_t>(i * 8);
+        MEMORY_BASIC_INFORMATION local_mbi{};
+        if (VirtualQuery(reinterpret_cast<void*>(slot_addr), &local_mbi, sizeof(local_mbi)) == 0)
+            return 0;
+        if (!(local_mbi.State & MEM_COMMIT)) return 0;
+        uintptr_t fn = *reinterpret_cast<uintptr_t*>(slot_addr);
+        if (fn < game_base_ || fn >= game_base_ + game_size_) return 0;
+        return fn - game_base_;
+    };
+
     MEMORY_BASIC_INFORMATION mbi{};
     for (uint32_t off = kStart; off < kEnd; off += kStep) {
         uintptr_t slot_addr = rt.world_system_ptr + off;
@@ -279,8 +299,22 @@ void HookManager::scan_world_system_siblings() {
         uintptr_t vtable_rva = (vtable >= game_base_ && vtable < game_base_ + game_size_)
                                ? vtable - game_base_ : 0;
 
-        logger->info("ws+0x{:02X}: sibling=0x{:X} vtable=0x{:X} (RVA 0x{:X})",
-                     off, sibling, vtable, vtable_rva);
+        // First 4 vfunc RVAs are a stable behavioural fingerprint — they
+        // typically include destructor + a couple of class-specific
+        // virtuals. Logging them makes the probe output identifiable
+        // against any RTTI dump or x64dbg symbol cross-reference, which
+        // is exactly what we need community submitters to match against.
+        uintptr_t f0 = 0, f1 = 0, f2 = 0, f3 = 0;
+        if (vtable_rva != 0) {
+            f0 = vfunc_rva(vtable, 0);
+            f1 = vfunc_rva(vtable, 1);
+            f2 = vfunc_rva(vtable, 2);
+            f3 = vfunc_rva(vtable, 3);
+        }
+
+        logger->info("ws+0x{:02X}: sibling=0x{:X} vtable=0x{:X} (RVA 0x{:X}) "
+                     "vfuncs=[0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}]",
+                     off, sibling, vtable, vtable_rva, f0, f1, f2, f3);
 
         // Best-effort heuristic caching. These are stored as "candidates"
         // only; the names are community guesses and may be wrong.
@@ -451,6 +485,45 @@ bool HookManager::resolve_player_base() {
     }
 
     spdlog::warn("Failed to resolve player via PlayerBase methods");
+    return false;
+}
+
+bool HookManager::resolve_child_actor_vtbl() {
+    auto& rt = get_runtime_offsets();
+    if (rt.child_actor_vtbl != 0) return true;
+
+    // Three sibling sigs from EquipHide that all anchor a `lea rax, [rip+VTBL]`
+    // followed by `mov [rsi], rax`. The RIP_OFFSET in each constant is the
+    // byte position of the disp32 inside the matched bytes. follow_rel32
+    // returns the absolute address the LEA loads — that's the vtable.
+    auto try_pattern = [&](const char* sig, const char* name, int rip_offset) -> bool {
+        auto result = sig_scan(sig, name);
+        if (!result) return false;
+        uintptr_t vtbl = MemoryScanner::follow_rel32(result.address + rip_offset, 0);
+        if (!is_valid_ptr(vtbl)) {
+            spdlog::warn("ChildActor vtable address invalid from {}", name);
+            return false;
+        }
+        // Vtables live in the game module's .rdata. Reject anything outside.
+        if (vtbl < game_base_ || vtbl >= game_base_ + game_size_) {
+            spdlog::warn("ChildActor vtable from {} out of game module range (0x{:X})",
+                         name, vtbl);
+            return false;
+        }
+        rt.child_actor_vtbl = vtbl;
+        spdlog::info("ChildActor vtable resolved at 0x{:X} (RVA 0x{:X}) via {}",
+                     vtbl, vtbl - game_base_, name);
+        return true;
+    };
+
+    if (try_pattern(signatures::CHILD_ACTOR_VTBL_P1, "ChildActor_VTBL_P1",
+                    signatures::CHILD_ACTOR_VTBL_P1_RIP_OFFSET)) return true;
+    if (try_pattern(signatures::CHILD_ACTOR_VTBL_P2, "ChildActor_VTBL_P2",
+                    signatures::CHILD_ACTOR_VTBL_P2_RIP_OFFSET)) return true;
+    if (try_pattern(signatures::CHILD_ACTOR_VTBL_P3, "ChildActor_VTBL_P3",
+                    signatures::CHILD_ACTOR_VTBL_P3_RIP_OFFSET)) return true;
+
+    spdlog::warn("Failed to resolve ChildActor vtable - all patterns failed");
     return false;
 }
 
