@@ -63,7 +63,7 @@ void WorldSync::on_quest_update(uint32_t quest_id, uint32_t stage) {
     pkt.new_state = stage;
 
     Session::instance().send_packet(pkt, true);
-    spdlog::warn("Quest update sent but receive-side is stub-only: quest {} -> stage {}", quest_id, stage);
+    spdlog::debug("Quest update sent (receive-side stub): quest {} -> stage {}", quest_id, stage);
 }
 
 void WorldSync::on_cutscene_trigger(uint32_t cutscene_id) {
@@ -75,7 +75,7 @@ void WorldSync::on_cutscene_trigger(uint32_t cutscene_id) {
     pkt.object_id = cutscene_id;
 
     Session::instance().send_packet(pkt, true);
-    spdlog::warn("Cutscene trigger sent but receive-side is stub-only: {}", cutscene_id);
+    spdlog::debug("Cutscene trigger sent (receive-side stub): {}", cutscene_id);
 }
 
 // --- Private ---
@@ -84,38 +84,32 @@ void WorldSync::on_remote_interact(const uint8_t* data, size_t size) {
     if (size < sizeof(WorldInteractPacket)) return;
     auto* pkt = reinterpret_cast<const WorldInteractPacket*>(data);
 
-    spdlog::warn("World interact received but not applied (stub): obj={}, type={}, state={}",
-                  pkt->object_id, pkt->interaction_type, pkt->new_state);
-
-    // STUB: World object manager layout is unknown. MapLookup/MapInsert sigs
-    // from EquipHide exist but the manager struct needs more RE work.
-    // Both players share the same game world, so most interactions sync
-    // naturally. This handler would cover edge cases where one player
-    // triggers something while the other is out of range.
+    // The world-object manager's exact layout is unknown. When the
+    // world-system probe has run it caches a candidate pointer we *might*
+    // be able to use; log that here so telemetry bridges the gap. Writes
+    // are still disabled until a real dispatch function is identified.
+    auto& rt = get_runtime_offsets();
+    spdlog::debug("World interact received (stub): obj={}, type={}, state={}, candidate_mgr=0x{:X}",
+                  pkt->object_id, pkt->interaction_type, pkt->new_state,
+                  rt.world_object_manager_candidate);
 }
 
 void WorldSync::on_remote_quest_update(const uint8_t* data, size_t size) {
     if (size < sizeof(WorldInteractPacket)) return;
     auto* pkt = reinterpret_cast<const WorldInteractPacket*>(data);
 
-    spdlog::warn("Quest update received but not applied (stub): quest {} -> stage {}",
-                  pkt->object_id, pkt->new_state);
-
-    // STUB: Quest manager pointer not yet found. The quest system likely lives
-    // under WorldSystem as a subsystem. Quest state mostly syncs naturally
-    // since both players share the same game world.
+    auto& rt = get_runtime_offsets();
+    spdlog::debug("Quest update received (stub): quest {} -> stage {}, candidate_mgr=0x{:X}",
+                  pkt->object_id, pkt->new_state, rt.quest_manager_candidate);
 }
 
 void WorldSync::on_remote_cutscene(const uint8_t* data, size_t size) {
     if (size < sizeof(WorldInteractPacket)) return;
     auto* pkt = reinterpret_cast<const WorldInteractPacket*>(data);
 
-    spdlog::warn("Cutscene trigger received but not applied (stub): {}",
-                  pkt->object_id);
-
-    // STUB: Cutscene manager not yet found. Cutscenes triggered by the host's
-    // progression play for both players since they share the same game world.
-    // This handler would cover cases where Player 2 is far from the trigger zone.
+    auto& rt = get_runtime_offsets();
+    spdlog::debug("Cutscene trigger received (stub): {}, candidate_mgr=0x{:X}",
+                  pkt->object_id, rt.cutscene_manager_candidate);
 }
 
 } // namespace cdcoop

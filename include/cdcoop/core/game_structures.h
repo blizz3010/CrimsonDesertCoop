@@ -68,8 +68,12 @@ namespace StatEntry {
     constexpr int32_t SPIRIT_ID       = 18;
 
     // Cross-offsets between stat entries (from EquipHide actor_resolve.cpp):
-    // Given the health_entry address, stamina and spirit entries are at fixed offsets.
-    // This allows resolving all three stats from just the health entry pointer.
+    // Given the health_entry address, stamina and spirit entries start at these
+    // offsets. The entry's current value is then at +StatEntry::CURRENT_VALUE (0x08).
+    //   stamina_current = *(int64*)(health_entry + STAMINA_FROM_HEALTH + CURRENT_VALUE)
+    //                   = health_entry + 0x480 + 0x08 = health_entry + 0x488
+    //   spirit_current  = health_entry + 0x510 + 0x08 = health_entry + 0x518
+    // This matches PlayerBase::STAMINA_OFFSET / SPIRIT_OFFSET below (0x488 / 0x518).
     constexpr uint32_t STAMINA_FROM_HEALTH = 0x480; // stamina_entry = health_entry + 0x480
     constexpr uint32_t SPIRIT_FROM_HEALTH  = 0x510; // spirit_entry  = health_entry + 0x510
 }
@@ -282,16 +286,37 @@ namespace offsets {
         // Instruction at +0x36ADB8C: 41 0F 11 45 00 (movups [r13+00], xmm0)
         constexpr uint32_t POS_WRITE_RVA  = 0x36ADB8C;
 
-        // These offsets are from the actor base, discovered via EquipHide RE work.
-        // They need fine-tuning with Cheat Engine / ReClass but are reasonable estimates
-        // based on the BlackSpace Engine actor layout.
-        constexpr uint32_t ANIM_STATE     = 0x120;  // uint32_t - animation state ID
-        constexpr uint32_t ANIM_BLEND     = 0x124;  // float - blend weight
-        constexpr uint32_t IS_ATTACKING   = 0x130;  // bool
-        constexpr uint32_t IS_DODGING     = 0x131;  // bool
-        constexpr uint32_t WEAPON_ID      = 0x134;  // uint32_t
-        constexpr uint32_t MOVEMENT_SPEED = 0x140;  // float
-        constexpr uint32_t GRAVITY_SCALE  = 0x144;  // float
+        // DEPRECATED / ESTIMATED offsets on the actor base. CDAnimCancel's
+        // reverse engineering of the BlackSpace .paac action-chart system shows
+        // that animation is driven by a separate "AnimationEvaluator" object,
+        // not these actor fields. Writing to them appears to do nothing in-game.
+        // Kept for source compatibility only -- do NOT rely on these.
+        // Prefer offsets::AnimationEvaluator::* when the experimental evaluator
+        // hook is enabled (see enable_experimental_hooks in config.json).
+        constexpr uint32_t ANIM_STATE     = 0x120;  // DEPRECATED - estimated, likely wrong
+        constexpr uint32_t ANIM_BLEND     = 0x124;  // DEPRECATED - estimated, likely wrong
+        constexpr uint32_t IS_ATTACKING   = 0x130;  // DEPRECATED - unverified by community
+        constexpr uint32_t IS_DODGING     = 0x131;  // DEPRECATED - unverified
+        constexpr uint32_t WEAPON_ID      = 0x134;  // DEPRECATED - estimated
+        constexpr uint32_t MOVEMENT_SPEED = 0x140;  // DEPRECATED - estimated
+        constexpr uint32_t GRAVITY_SCALE  = 0x144;  // DEPRECATED - estimated
+    }
+
+    // =====================================================================
+    // Animation Evaluator (from CDAnimCancel research, April 2026)
+    // The BlackSpace Engine drives animation via a separate evaluator object.
+    // CDAnimCancel's evaluator guard was located at CrimsonDesert.exe+0x2712330
+    // and the evaluator function prologue at +0x2712090 (AOB below).
+    // At the evaluator entry, rcx = evaluator struct "this" pointer.
+    // CDAnimCancel observed the in-combat flag at [rbx+0x6A] inside a callee
+    // that receives the evaluator in rbx.
+    // =====================================================================
+    namespace AnimationEvaluator {
+        constexpr uint32_t STATE          = 0x00;   // uint32_t - current action chart state ID
+        constexpr uint32_t BLEND_WEIGHT   = 0x04;   // float    - active blend weight
+        constexpr uint32_t COMBAT_FLAG    = 0x6A;   // byte     - in-combat / action-active flag
+        constexpr uint32_t ENTRY_RVA      = 0x2712090; // function entry RVA (informational)
+        constexpr uint32_t GUARD_RVA      = 0x2712330; // guard helper RVA   (informational)
     }
 
     namespace Companion {
@@ -299,7 +324,7 @@ namespace offsets {
         // AI controller and active flag offsets from EquipHide body navigation.
         constexpr uint32_t AI_CONTROLLER  = 0x48;   // ptr - AI behavior controller (component link)
         constexpr uint32_t MODEL_ID       = 0x110;  // uint32_t
-        constexpr uint32_t ANIM_STATE     = 0x120;  // uint32_t - same layout as player
+        constexpr uint32_t ANIM_STATE     = 0x120;  // DEPRECATED - see Player::ANIM_STATE note
         constexpr uint32_t IS_ACTIVE      = 0x1C;   // bool (PartInOutSocket visible byte)
     }
 
@@ -453,6 +478,18 @@ namespace offsets {
 
         // Dragon HP is confirmed to be float type, not int64*1000 like player/horse stats.
         constexpr uint32_t DRAGON_HP_IS_FLOAT = 1;
+
+        // Dragon HP dynamic scan parameters. The exact offset of dragon HP
+        // within the dragon marker struct is unknown but confirmed to be a
+        // positive float in a plausible HP range. When the player first mounts
+        // a dragon, we scan the marker struct at pointer-aligned offsets and
+        // pick the most plausible float as the HP address. Result is cached
+        // in RuntimeOffsets::dragon_hp_offset so we only scan once.
+        constexpr uint32_t DRAGON_HP_SCAN_MIN_OFFSET = 0x08;
+        constexpr uint32_t DRAGON_HP_SCAN_MAX_OFFSET = 0x200;
+        constexpr uint32_t DRAGON_HP_SCAN_STRIDE     = 0x04;  // 4-byte float align
+        constexpr float    DRAGON_HP_PLAUSIBLE_MIN   = 100.0f;
+        constexpr float    DRAGON_HP_PLAUSIBLE_MAX   = 10000000.0f; // 1e7 cap
     }
 
     // =========================================================================
@@ -824,6 +861,16 @@ namespace signatures {
     // Injection at CrimsonDesert.exe+1ABCA25: prevents item removal
     constexpr const char* ITEM_REMOVE_NO_DEC =
         "?? 29 ?? 07 10 ?? 8B ?? ?? 03 ?? ?? FF FF 00 00";
+
+    // --- Animation Evaluator (from CDAnimCancel, April 2026) ---
+    // Located at CrimsonDesert.exe+0x2712090 (the evaluator function prologue).
+    // On entry: rcx = evaluator struct "this" pointer. Hook to capture and
+    // gain access to the real animation state (rather than the estimated
+    // actor+0x120/0x124 fields that do not control playback).
+    // Source: https://github.com/faisalkindi/CDAnimCancel
+    constexpr const char* ANIM_EVALUATOR =
+        "0F 28 CE 48 89 4C 24 20 48 8B CB E8";
+    constexpr int ANIM_EVALUATOR_OFFSET = 0;
 }
 
 // =========================================================================
@@ -841,10 +888,33 @@ struct RuntimeOffsets {
     uintptr_t camera_struct_ptr = 0;      // Camera struct base (r12 from zoom/FOV hook)
     uintptr_t contribution_data_ptr = 0;  // Contribution data struct (r9 from contribution hook)
 
+    // CDAnimCancel-derived animation evaluator "this" pointer, captured when
+    // the experimental animation hook fires. When non-null, AnimationSync
+    // writes to AnimationEvaluator::STATE/BLEND_WEIGHT instead of the
+    // deprecated actor+0x120/0x124 fields.
+    uintptr_t animation_evaluator_ptr = 0;
+
+    // Dragon mount marker pointer + dynamically-discovered HP offset. The
+    // dragon marker only resolves while mounted; we scan for the HP float
+    // field once per mount session and cache it here.
+    uintptr_t dragon_marker_ptr = 0;
+    uint32_t  dragon_hp_offset = 0;       // 0 = not yet resolved
+
+    // WorldSystem sibling probe results. When the experimental world-system
+    // probe runs, it logs the vtable RTTI of every non-null sibling pointer
+    // within WorldSystem+0x30..0x100. Best-guess candidates for the three
+    // unknown managers are cached here for future on-demand use.
+    uintptr_t quest_manager_candidate        = 0;
+    uintptr_t cutscene_manager_candidate     = 0;
+    uintptr_t world_object_manager_candidate = 0;
+
     bool world_system_resolved = false;
     bool player_resolved = false;
     bool position_resolved = false;
     bool camera_resolved = false;
+    bool animation_evaluator_resolved = false;
+    bool dragon_hp_resolved = false;
+    bool world_probe_ran = false;
 };
 
 // Global runtime offsets instance
@@ -867,6 +937,14 @@ bool write_mem(uintptr_t base, uint32_t offset, const T& value) {
 
 // Safe pointer chain dereference (follows pointer chain, returns 0 on null)
 uintptr_t resolve_ptr_chain(uintptr_t base, std::initializer_list<uint32_t> offsets);
+
+// Scan a struct for a float field that passes a plausibility check.
+// Reads `base + off` as float for off in [min_off, max_off) stepped by
+// `stride`. Returns the first offset whose value satisfies min <= v <= max
+// (and is finite / non-NaN / non-zero). Returns 0 if nothing matches.
+// Read-only; does not mutate memory.
+uint32_t dynamic_scan_float(uintptr_t base, uint32_t min_off, uint32_t max_off,
+                            uint32_t stride, float plausible_min, float plausible_max);
 
 // Minimum valid pointer address (below this is likely invalid)
 constexpr uintptr_t kMinimumPointerAddress = 0x10000000;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(CrimsonDesertCoop VERSION 0.1.0 LANGUAGES CXX)
+project(CrimsonDesertCoop VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -123,6 +123,15 @@ target_compile_definitions(cdcoop_core PUBLIC
     NOMINMAX
     CDCOOP_VERSION="${PROJECT_VERSION}"
 )
+
+# Warning level - catch common issues at compile time. Only applied to
+# our own translation units; fetched dependencies (imgui, spdlog, etc.)
+# are not included here so they keep their upstream warning settings.
+if(MSVC)
+    target_compile_options(cdcoop_core PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cdcoop_core PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
 
 # --------------------------------------------------------------------------
 # ASI plugin (main deliverable - loaded by ASI loader into game process)
