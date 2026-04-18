@@ -168,7 +168,7 @@ void Overlay::render_debug_panel() {
     ImGui::Text("Camera: 0x%llX (%s)",
                 static_cast<unsigned long long>(rt.camera_struct_ptr),
                 rt.camera_resolved ? "OK" : "NOT FOUND");
-    if (rt.camera_resolved) {
+    if (rt.camera_resolved && is_valid_ptr(rt.camera_struct_ptr)) {
         float fov = read_mem<float>(rt.camera_struct_ptr, offsets::Camera::ZOOM_FOV);
         ImGui::Text("  Zoom/FOV: %.2f", fov);
     }
@@ -178,7 +178,7 @@ void Overlay::render_debug_panel() {
     ImGui::Text("AnimEvaluator: 0x%llX (%s)",
                 static_cast<unsigned long long>(rt.animation_evaluator_ptr),
                 rt.animation_evaluator_resolved ? "CAPTURED" : "not captured");
-    if (rt.dragon_hp_resolved) {
+    if (rt.dragon_hp_resolved && is_valid_ptr(rt.dragon_marker_ptr)) {
         ImGui::Text("Dragon HP: marker+0x%X = %.0f",
                     rt.dragon_hp_offset,
                     read_mem<float>(rt.dragon_marker_ptr, rt.dragon_hp_offset));
@@ -188,7 +188,7 @@ void Overlay::render_debug_panel() {
 
     const auto& local_mount  = MountSync::instance().local_state();
     const auto& remote_mount = MountSync::instance().remote_state();
-    if (rt.mount_resolved) {
+    if (rt.mount_resolved && is_valid_ptr(rt.mount_ptr)) {
         ImGui::Text("Local mount: 0x%llX (%s)",
                     static_cast<unsigned long long>(rt.mount_ptr),
                     local_mount.is_mounted ? "MOUNTED" : "dismounted");

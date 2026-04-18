@@ -144,8 +144,8 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for all 40+ p
 | StatWrite | `STAT_WRITE_PRIMARY` / `STAT_WRITE_FALLBACK` | Health/stamina/spirit interception |
 | CameraZoomFOV | `CAMERA_ZOOM_FOV` / `CAMERA_ZOOM_FOV_NONWILD` | Camera struct capture (r12+0xD8) |
 | WorldSystem | `WORLD_SYSTEM_P1` / `P2` / `P3` | WorldSystem singleton resolution |
-| AnimationEvaluator (opt-in) | `ANIM_EVALUATOR` | rcx = evaluator this-pointer, gated on `enable_experimental_hooks` |
-| DragonHpProbe (opt-in) | `DRAGON_TIMER` | Marker capture + dynamic HP scan, gated on `enable_experimental_hooks` |
+| AnimationEvaluator (opt-in) | `ANIM_EVALUATOR` | rcx = evaluator this-pointer (function entry), gated on `enable_experimental_hooks` |
+| DragonHpProbe (opt-in, mid-hook) | `DRAGON_TIMER` | r13 = mount marker at the timer write site; dynamic HP scan, gated on `enable_experimental_hooks`. Converted from inline-hook to mid-hook because the AOB hits a mid-function `mov [r13+0x160]` write, not a function entry — the previous detour treated rcx as the marker which scanned unrelated memory |
 | TeleportWaypoint (opt-in, mid-hook) | `TELEPORT_WAYPOINT` | r15 = source waypoint struct; gated on `sync_fast_travel` |
 
 ### Hooks Defined But Not Yet Installed (Need Signatures)

@@ -77,7 +77,11 @@ void mod_main() {
 
         // Step 4: Initialize companion hijack system
         if (!cdcoop::CompanionHijack::instance().initialize()) {
-            spdlog::warn("Companion hijack init failed - will retry when companion spawns");
+            // CompanionHijack::activate() lazily re-initializes if needed,
+            // so a failure here just means we have no companion *yet* —
+            // PlayerManager::spawn_remote_player() will retry when the
+            // session connects and a companion is in the party.
+            spdlog::warn("Companion hijack init failed - will retry on activate()");
         }
 
         // Step 5: Initialize overlay UI

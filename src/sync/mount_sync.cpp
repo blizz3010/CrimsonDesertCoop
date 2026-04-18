@@ -92,7 +92,7 @@ bool MountSync::poll_local_mount(MountView& out) {
     int64_t max_st = read_mem<int64_t>(stat_base, StatEntry::STAMINA_FROM_HEALTH + StatEntry::MAX_VALUE);
 
     // Sanity: if HP is zero or nonsense, treat as dismounted.
-    if (max_hp <= 0 || max_hp > 100'000'000LL * 1000LL) {
+    if (max_hp <= 0 || max_hp > offsets::Mount::HP_SANITY_MAX_RAW) {
         out.is_mounted = false;
         return false;
     }

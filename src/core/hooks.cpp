@@ -146,9 +146,18 @@ bool HookManager::initialize() {
                       "AnimationEvaluator",
                       hooks::animation_evaluator_detour, hooks::animation_evaluator_hook, false);
 
-        try_hook_pair(signatures::DRAGON_TIMER, nullptr,
-                      "DragonHpProbe",
-                      hooks::dragon_hp_probe_detour, hooks::dragon_hp_probe_hook, false);
+        // Dragon HP probe — mid-hook (r13 = mount marker at the timer write site)
+        auto dragon_sig = sig_scan(signatures::DRAGON_TIMER, "DragonHpProbe");
+        if (dragon_sig && create_mid_hook(dragon_sig.address, hooks::dragon_hp_probe_detour,
+                                          hooks::dragon_hp_probe_hook)) {
+            spdlog::info("Installed DragonHpProbe mid-hook");
+            status_.installed++;
+            status_.installed_names.emplace_back("DragonHpProbe (mid)");
+        } else {
+            spdlog::warn("Failed to install DragonHpProbe hook (optional)");
+            status_.failed++;
+            status_.failed_names.emplace_back("DragonHpProbe");
+        }
     } else {
         spdlog::debug("Experimental hooks disabled (stable mode)");
     }
@@ -455,33 +464,39 @@ void __cdecl player_position_detour(void* player, float x, float y, float z) {
     // Call original
     player_position_hook.call<void>(player, x, y, z);
 
-    // Update runtime position pointer.
-    // At this hook point (from PositionHeightAccess sig), r13 = float* position.
-    // The function arguments give us the position components directly.
+    // The POSITION_PRIMARY/FALLBACK AOBs hit a mid-function position
+    // write, not a function entry, so the (x, y, z) detour args are not
+    // a reliable source of position data — only x lines up with xmm0
+    // by coincidence; y and z are whatever the registers next to it
+    // happen to hold. Always read position + rotation from the verified
+    // pointer chain instead. The arg list is preserved purely so the
+    // .call<>() to the original prologue compiles.
+    (void)player; (void)x; (void)y; (void)z;
+
     auto& rt = get_runtime_offsets();
     rt.position_resolved = true;
 
     // Broadcast our position to peer
-    if (Session::instance().is_active()) {
-        Vec3 pos{x, y, z};
-        // Read rotation from the player actor via the verified pointer chain
-        Quat rot{0, 0, 0, 1};
-        if (is_valid_ptr(rt.player_actor_ptr)) {
-            uintptr_t player_core = resolve_ptr_chain(rt.player_actor_ptr, {
-                offsets::Player::ACTOR_TO_INNER, offsets::Player::INNER_TO_CORE
-            });
-            if (is_valid_ptr(player_core)) {
-                uintptr_t pos_struct = resolve_ptr_chain(player_core, {
-                    offsets::Player::POS_OWNER_TO_STRUCT
-                });
-                if (is_valid_ptr(pos_struct)) {
-                    rot = read_mem<Quat>(pos_struct, offsets::Player::ROTATION_QUAT);
-                }
-            }
-        }
-        Vec3 vel{0, 0, 0};
-        PlayerSync::instance().on_local_position_changed(pos, rot, vel, 0);
-    }
+    if (!Session::instance().is_active()) return;
+    if (!is_valid_ptr(rt.player_actor_ptr)) return;
+
+    uintptr_t player_core = resolve_ptr_chain(rt.player_actor_ptr, {
+        offsets::Player::ACTOR_TO_INNER, offsets::Player::INNER_TO_CORE
+    });
+    if (!is_valid_ptr(player_core)) return;
+
+    uintptr_t pos_struct = resolve_ptr_chain(player_core, {
+        offsets::Player::POS_OWNER_TO_STRUCT
+    });
+    if (!is_valid_ptr(pos_struct)) return;
+
+    Vec3 pos{
+        read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X),
+        read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y),
+        read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z)
+    };
+    Quat rot = read_mem<Quat>(pos_struct, offsets::Player::ROTATION_QUAT);
+    PlayerSync::instance().on_local_position_changed(pos, rot, {0, 0, 0}, 0);
 }
 
 void __cdecl player_animation_detour(void* player, uint32_t anim_id, float blend) {
@@ -613,10 +628,12 @@ void __cdecl animation_evaluator_detour(void* evaluator) {
     }
 }
 
-void __cdecl dragon_hp_probe_detour(void* dragon_marker) {
-    dragon_hp_probe_hook.call<void>(dragon_marker);
-
-    auto marker_addr = reinterpret_cast<uintptr_t>(dragon_marker);
+void dragon_hp_probe_detour(SafetyHookContext& ctx) {
+    // Mid-hook at the dragon timer write (`mov [r13+0x160], reg`).
+    // r13 holds the dragon mount marker. Previous inline-hook detour
+    // assumed rcx held the marker, which scanned random unrelated
+    // memory because the calling convention doesn't apply mid-function.
+    uintptr_t marker_addr = ctx.r13;
     if (!is_valid_ptr(marker_addr)) return;
 
     auto& rt = get_runtime_offsets();

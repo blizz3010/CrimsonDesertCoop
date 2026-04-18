@@ -491,6 +491,13 @@ namespace offsets {
         constexpr float    DRAGON_HP_PLAUSIBLE_MIN   = 100.0f;
         constexpr float    DRAGON_HP_PLAUSIBLE_MAX   = 10000000.0f; // 1e7 cap
 
+        // Sanity cap for raw int64 stat reads (displayed * 1000). Used by
+        // MountSync to reject obviously bad values when the mount pointer
+        // points at stale or unrelated memory after a dismount.
+        // 100M displayed HP * 1000 = 1e11 raw — generous bound that no
+        // legit mount can exceed.
+        constexpr int64_t  HP_SANITY_MAX_RAW = 100'000'000'000LL;
+
         // Strong HP candidate derived from the dragon-mount field map at
         // CrimsonDesert.exe+0x339D8CB (bbfox0703 CT entry 160). +0xD8 is the
         // only standalone 4-byte float in the +0xC0..+0xEC stat cluster and
