@@ -490,6 +490,14 @@ namespace offsets {
         constexpr uint32_t DRAGON_HP_SCAN_STRIDE     = 0x04;  // 4-byte float align
         constexpr float    DRAGON_HP_PLAUSIBLE_MIN   = 100.0f;
         constexpr float    DRAGON_HP_PLAUSIBLE_MAX   = 10000000.0f; // 1e7 cap
+
+        // Strong HP candidate derived from the dragon-mount field map at
+        // CrimsonDesert.exe+0x339D8CB (bbfox0703 CT entry 160). +0xD8 is the
+        // only standalone 4-byte float in the +0xC0..+0xEC stat cluster and
+        // is written with xmm8 on the mount-init path, matching the horse HP
+        // convention. Prefer this offset in the scan before falling back to
+        // the wider min..max sweep. See docs/RESEARCH_2026-04-18.md #5.
+        constexpr uint32_t DRAGON_HP_PREFERRED_OFFSET = 0xD8;
     }
 
     // =========================================================================
@@ -519,6 +527,40 @@ namespace offsets {
 
         // Battle damage return address (from EquipHide, for damage hook validation):
         constexpr uint32_t BATTLE_DAMAGE_RET_RVA = 0x1A50BB0; // Return address for battle damage path
+    }
+
+    // =========================================================================
+    // Teleport / fast-travel (from bbfox0703 CT entries 174-176, v1.01.03)
+    // The game copies a map-waypoint target into an entity slot before
+    // applying it. We currently use this only as a research reference; see
+    // docs/RESEARCH_2026-04-18.md #7 for the planned hook design.
+    // =========================================================================
+    namespace Teleport {
+        // Waypoint-apply injection point. At this site:
+        //   r14 = destination entity
+        //   r15 = source waypoint struct
+        // AOB: F2 41 0F 11 86 D8 00 00 00 ?? ?? ?? ?? 41 89 86 E0 00 00 00
+        constexpr uint32_t WAYPOINT_APPLY_RVA = 0xAB5594;
+
+        // Destination entity layout at r14 at the apply site:
+        constexpr uint32_t ENTITY_WAYPOINT_XY = 0xD8;  // double (X@+0, Y@+4)
+        constexpr uint32_t ENTITY_WAYPOINT_Z  = 0xE0;  // float
+
+        // Source waypoint struct layout at r15:
+        constexpr uint32_t SRC_WAYPOINT_XY    = 0x1C;  // double (X,Y packed)
+        constexpr uint32_t SRC_WAYPOINT_Z     = 0x24;  // float
+
+        // World-offset global. The game stores entity positions at
+        // [entity+0x90] in entity-local space; world pos = local + worldOffset.
+        // Resolved via RIP-relative AOB (pos=3, len=7):
+        //   0F ?? ?? ?? ?? ?? ?? 0F 11 ?? 90 00 00 00 E8 ?? ?? ?? ?? F3
+        // Confirmed use site writes the adjusted xmm3 back to [rcx+0x90]:
+        constexpr uint32_t WORLD_OFFSET_USE_RVA = 0x278C6C8;
+
+        // Entity velocity write. Packed {X, Z_height, Y, W} float4.
+        // AOB: 0F C6 ?? 00 0F 59 ?? ?? 8B ?? 0F 11 ?? B0 01 00 00
+        constexpr uint32_t ENTITY_VELOCITY    = 0x1B0;
+        constexpr uint32_t VELOCITY_HOOK_RVA  = 0x2791A16;
     }
 
     namespace World {

@@ -219,16 +219,16 @@ These are the remaining offsets/systems needed. **If you have access to any of t
 | 2 | **MEDIUM** | Quest Manager | Confirm which WorldSystem sibling slot from `cdcoop_world_probe.log` is the quest manager, then identify its "set stage" entry function | Probe scaffolding landed; waiting on community log submissions |
 | 3 | **MEDIUM** | Cutscene Manager | Same probe approach; find the cutscene trigger function | Probe scaffolding landed; waiting on logs |
 | 4 | **MEDIUM** | Camera State | Map camera struct beyond zoom (`+0xD8`) - position, rotation, target | Partial (zoom only) |
-| 5 | **MEDIUM** | Dragon HP verification | Verify the float offset picked by the 0.2.0 dynamic scan matches in-game HP. If wrong, widen / tighten the plausibility range in `Mount::DRAGON_HP_PLAUSIBLE_*` | Auto-scan lands a value but needs confirmation |
+| 5 | **MEDIUM** | Dragon HP verification | Read `[dragon_mount+0xD8]` in-game and confirm it tracks the HP bar. Strong candidate from the dragon-mount field map at `CrimsonDesert.exe+0x339D8CB` (see [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md)). Integrated as `Mount::DRAGON_HP_PREFERRED_OFFSET` | **Candidate known**, needs field read-back |
 | 6 | **LOW** | World Objects | Confirm WorldSystem sibling for doors / chests / interactive world objects | Probe candidate stored but not yet mapped to a dispatch function |
-| 7 | **LOW** | Teleport System | Hook fast travel to sync both players to same destination | Not started |
+| 7 | **LOW** | Teleport System | Hook fast travel at `CrimsonDesert.exe+0xAB5594` (`r14` = entity, `r15` = waypoint source). Snapshot `[r15+0x1C..0x28]` on host, broadcast, replay on peer. AOB + full struct in [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md) | **Signatures known**, hook not yet installed |
 | 8 | **LOW** | Combat Flag verification | The evaluator `+0x6A` flag from CDAnimCancel now writes when experimental hooks are enabled - confirm it actually gates co-op combat state the way we want | New hook needs field testing |
 
 #### Where to Look
 
 - **Animation**: The animation system uses **.paac action chart files**, not simple actor struct fields. [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) has a `extract_paac.py` parser and found the evaluator function at `CrimsonDesert.exe+2712090` (AOB: `0F 28 CE 48 89 4C 24 20 48 8B CB E8`). [CrimsonForge](https://www.nexusmods.com/crimsondesert/mods/446) can extract .paa animation files from PAZ
 - **Quest/Cutscene**: WorldSystem (+0x30 = ActorManager) likely has sibling pointers to other managers. Scan +0x38, +0x40, +0x48 etc. [NattKh Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) has 633 quests / 5,450 missions for validation. CDAnimCancel found InputBlock RTTI at `0x144AFCC70` handles "menu/cutscene blocking" - possible lead
-- **Dragon HP**: Confirmed float type. Orcax mod uses dynamic root scanning (offsets 0x08-0x200, step sizeof(ptr)) with threshold comparison (max > 2.5M). Try same approach with float comparison for dragon
+- **Dragon HP**: Confirmed float type. 2026-04-18 research pass located the full mount struct field map at the dragon-timer injection point (`+0x339D8CB`) and identified `+0xD8` as the strongest HP candidate (only standalone float in the stat cluster, written with xmm8). Needs in-game read-back — see [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md) #5
 - **Camera**: [UltimateCameraMod](https://github.com/FitzDegenhub/UltimateCameraMod) has 150+ camera states in `playercamerapreset.xml`. Try ReClass on the camera struct pointer (captured via r12 in zoom hook)
 
 ### Resources (Bot-Protected / Auth-Gated)
