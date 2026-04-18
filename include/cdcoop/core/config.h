@@ -28,6 +28,17 @@ struct Config {
     bool log_packets = false;
     int log_level = 2; // 0=trace, 1=debug, 2=info, 3=warn, 4=error
 
+    // Experimental / research (off by default - opt in)
+    // When true, install hooks based on public research that has not been
+    // fully verified against this build. Includes the CDAnimCancel-derived
+    // animation evaluator hook and the dragon HP dynamic scan. Disable if
+    // the mod becomes unstable after a game patch.
+    bool enable_experimental_hooks = false;
+    // When true, after WorldSystem resolves, scan its sibling pointers and
+    // log their vtable RVAs to cdcoop_world_probe.log to help the community
+    // identify the quest / cutscene / world-object managers.
+    bool dump_world_system_probe = false;
+
     // Keybinds
     int toggle_overlay_key = 0x77; // F8
     int open_session_key = 0x76;   // F7
@@ -42,6 +53,7 @@ struct Config {
         sync_cutscenes, sync_quest_progress, skip_animation_remap,
         player2_model_id, player2_use_companion_slot,
         debug_overlay, log_packets, log_level,
+        enable_experimental_hooks, dump_world_system_probe,
         toggle_overlay_key, open_session_key
     )
 };

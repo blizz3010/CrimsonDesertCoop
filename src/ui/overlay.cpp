@@ -4,6 +4,7 @@
 #include <cdcoop/sync/player_sync.h>
 #include <cdcoop/core/config.h>
 #include <cdcoop/core/game_structures.h>
+#include <cdcoop/core/hooks.h>
 #include <spdlog/spdlog.h>
 
 #include <imgui.h>
@@ -147,6 +148,45 @@ void Overlay::render_debug_panel() {
     if (rt.camera_resolved) {
         float fov = read_mem<float>(rt.camera_struct_ptr, offsets::Camera::ZOOM_FOV);
         ImGui::Text("  Zoom/FOV: %.2f", fov);
+    }
+
+    // --- Experimental / research state ---
+    ImGui::Separator();
+    ImGui::Text("AnimEvaluator: 0x%llX (%s)",
+                static_cast<unsigned long long>(rt.animation_evaluator_ptr),
+                rt.animation_evaluator_resolved ? "CAPTURED" : "not captured");
+    if (rt.dragon_hp_resolved) {
+        ImGui::Text("Dragon HP: marker+0x%X = %.0f",
+                    rt.dragon_hp_offset,
+                    read_mem<float>(rt.dragon_marker_ptr, rt.dragon_hp_offset));
+    } else {
+        ImGui::Text("Dragon HP: not resolved (mount a dragon first)");
+    }
+    if (rt.world_probe_ran) {
+        ImGui::Text("WS probe: ran (see cdcoop_world_probe.log)");
+    } else {
+        ImGui::Text("WS probe: not run (set dump_world_system_probe=true)");
+    }
+
+    // --- Hook installation telemetry ---
+    ImGui::Separator();
+    const auto& hs = HookManager::instance().status();
+    ImGui::Text("Hooks: %d installed, %d failed", hs.installed, hs.failed);
+    if (!hs.failed_names.empty()) {
+        if (ImGui::TreeNode("Failed hooks")) {
+            for (const auto& name : hs.failed_names) {
+                ImGui::BulletText("%s", name.c_str());
+            }
+            ImGui::TreePop();
+        }
+    }
+    if (!hs.installed_names.empty()) {
+        if (ImGui::TreeNode("Installed hooks")) {
+            for (const auto& name : hs.installed_names) {
+                ImGui::BulletText("%s", name.c_str());
+            }
+            ImGui::TreePop();
+        }
     }
 
     ImGui::End();

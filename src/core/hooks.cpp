@@ -1,17 +1,42 @@
 #include <cdcoop/core/hooks.h>
 #include <cdcoop/core/memory.h>
 #include <cdcoop/core/game_structures.h>
+#include <cdcoop/core/config.h>
 #include <cdcoop/network/session.h>
 #include <cdcoop/sync/player_sync.h>
 #include <cdcoop/sync/enemy_sync.h>
 #include <cdcoop/sync/world_sync.h>
 #include <cdcoop/player/companion_hijack.h>
+#include <cdcoop/player/player_manager.h>
 #include <cdcoop/ui/overlay.h>
 
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <Windows.h>
 
+#include <atomic>
+
 namespace cdcoop {
+
+namespace {
+// Dedicated logger for world-system probe telemetry. Created lazily on
+// first call to scan_world_system_siblings() so we don't spawn the file
+// when the probe is disabled.
+std::shared_ptr<spdlog::logger> worldprobe_logger() {
+    static std::shared_ptr<spdlog::logger> logger = []() {
+        try {
+            auto l = spdlog::basic_logger_mt("worldprobe", "cdcoop_world_probe.log", true);
+            l->set_pattern("%Y-%m-%d %H:%M:%S | %v");
+            l->set_level(spdlog::level::info);
+            return l;
+        } catch (const std::exception& e) {
+            spdlog::warn("Failed to create worldprobe logger: {}", e.what());
+            return std::shared_ptr<spdlog::logger>{};
+        }
+    }();
+    return logger;
+}
+} // namespace
 
 HookManager& HookManager::instance() {
     static HookManager inst;
@@ -46,98 +71,100 @@ bool HookManager::initialize() {
     // Game version: v1.00.02 / v1.01.03 (March 2026)
     // =====================================================================
 
-    int hooks_installed = 0;
-    int hooks_failed = 0;
+    status_ = {};
+
+    // Try a pair of (primary, fallback) signatures for the same logical hook,
+    // and record the outcome in HookStatus.
+    auto try_hook_pair = [&](const char* primary, const char* fallback,
+                              const char* name, auto detour,
+                              SafetyHookInline& slot, bool required) -> bool {
+        if (create_hook(primary, name, detour, slot)) {
+            spdlog::info("Installed {} hook (primary sig)", name);
+            status_.installed++;
+            status_.installed_names.emplace_back(std::string(name) + " (primary)");
+            return true;
+        }
+        if (fallback && create_hook(fallback, name, detour, slot)) {
+            spdlog::info("Installed {} hook (fallback sig)", name);
+            status_.installed++;
+            status_.installed_names.emplace_back(std::string(name) + " (fallback)");
+            return true;
+        }
+        if (required) {
+            spdlog::error("Failed to install {} hook", name);
+        } else {
+            spdlog::warn("Failed to install {} hook (optional)", name);
+        }
+        status_.failed++;
+        status_.failed_names.emplace_back(name);
+        return false;
+    };
 
     // --- WorldSystem singleton resolution (from EquipHide) ---
-    // This gives us access to the actor manager and player actor
     resolve_world_system();
 
     // --- Player base pointer resolution (from bbfox0703 CT, v1.01.03) ---
-    // Additional fallback: resolve the player static base via RIP-relative sig
     if (!get_runtime_offsets().player_resolved) {
         resolve_player_base();
     }
 
     // --- Player position hook ---
-    // From player-status-modifier: hooks the position height access function
-    // At hook point: r13 = float* position array [X, Y, Z]
-    if (create_hook(signatures::POSITION_PRIMARY, "PositionAccess",
-                    hooks::player_position_detour, hooks::player_position_hook)) {
-        spdlog::info("Installed PositionAccess hook (primary sig)");
-        hooks_installed++;
-    } else if (create_hook(signatures::POSITION_FALLBACK, "PositionAccess",
-                           hooks::player_position_detour, hooks::player_position_hook)) {
-        spdlog::info("Installed PositionAccess hook (fallback sig)");
-        hooks_installed++;
-    } else {
-        spdlog::error("Failed to install PositionAccess hook");
-        hooks_failed++;
-    }
+    // r13 = float* position array [X, Y, Z]
+    try_hook_pair(signatures::POSITION_PRIMARY, signatures::POSITION_FALLBACK,
+                  "PositionAccess",
+                  hooks::player_position_detour, hooks::player_position_hook, true);
 
     // --- Damage calculation hook ---
-    // From player-status-modifier: hooks the damage slot access
-    // At hook point: r15 = damage source ptr, r12 = damage amount (32-bit)
-    if (create_hook(signatures::DAMAGE_SLOT_PRIMARY, "DamageSlot",
-                    hooks::damage_calc_detour, hooks::damage_calc_hook)) {
-        spdlog::info("Installed DamageSlot hook");
-        hooks_installed++;
-    } else {
-        spdlog::error("Failed to install DamageSlot hook");
-        hooks_failed++;
-    }
+    // r15 = damage source ptr, r12 = damage amount (32-bit)
+    try_hook_pair(signatures::DAMAGE_SLOT_PRIMARY, nullptr,
+                  "DamageSlot",
+                  hooks::damage_calc_detour, hooks::damage_calc_hook, true);
 
-    // --- Stat write hook ---
-    // From player-status-modifier: intercepts the shared stat write path
-    // Health, stamina, and spirit all go through this opcode
-    if (create_hook(signatures::STAT_WRITE_PRIMARY, "StatWrite",
-                    hooks::world_state_detour, hooks::world_state_hook)) {
-        spdlog::info("Installed StatWrite hook (primary sig)");
-        hooks_installed++;
-    } else if (create_hook(signatures::STAT_WRITE_FALLBACK, "StatWrite",
-                           hooks::world_state_detour, hooks::world_state_hook)) {
-        spdlog::info("Installed StatWrite hook (fallback sig)");
-        hooks_installed++;
-    } else {
-        spdlog::error("Failed to install StatWrite hook");
-        hooks_failed++;
-    }
+    // --- Stat write hook (shared by health/stamina/spirit) ---
+    try_hook_pair(signatures::STAT_WRITE_PRIMARY, signatures::STAT_WRITE_FALLBACK,
+                  "StatWrite",
+                  hooks::world_state_detour, hooks::world_state_hook, true);
 
-    // --- Game tick: DX12 Present hook drives the update loop ---
-    // No dedicated game tick signature exists for the BlackSpace Engine.
-    // The DX12 Present hook (installed by Overlay in imgui_impl_dx12.cpp) fires
-    // once per frame and calls sync systems (Session, PlayerSync, EnemySync,
-    // WorldSync, PlayerManager) directly with accurate delta_time.
+    // --- Camera Zoom/FOV hook (r12 = camera, +0xD8 = zoom) ---
+    try_hook_pair(signatures::CAMERA_ZOOM_FOV, signatures::CAMERA_ZOOM_FOV_NONWILD,
+                  "CameraZoomFOV",
+                  hooks::camera_detour, hooks::camera_hook, false);
+
+    // --- Game tick: DX12 Present drives the update loop ---
     spdlog::info("Game tick: using DX12 Present hook as frame tick (no dedicated sig needed)");
 
-    // --- Hooks NOT yet installed (awaiting verified signatures) ---
-    // player_animation_hook: Animation state offsets 0x120/0x124 are estimated,
-    //   not verified. No animation write signature found yet. Animation sync
-    //   currently relies on 5Hz full-state fallback packets.
-    // companion_spawn_hook: No companion spawn function signature has been found.
-    //   Companion hijack currently scans body slots at session start instead.
+    // --- Experimental hooks (opt-in via config) ---
+    // Kept behind a flag because CDAnimCancel's evaluator AOB and the dragon
+    // HP dynamic scan are both third-party research that has not been
+    // verified against this specific build.
+    auto& cfg = get_config();
+    if (cfg.enable_experimental_hooks) {
+        spdlog::info("Experimental hooks enabled (config.enable_experimental_hooks = true)");
 
-    // --- Camera Zoom/FOV hook (from Send's CE table, game v1.00.03) ---
-    // Hooks the instruction: movss [r12+0xD8], xmm0
-    // r12 = camera struct base, 0xD8 = zoom/FOV offset
-    // This lets us capture the camera struct pointer and modify FOV for co-op
-    if (create_hook(signatures::CAMERA_ZOOM_FOV, "CameraZoomFOV",
-                    hooks::camera_detour, hooks::camera_hook)) {
-        spdlog::info("Installed CameraZoomFOV hook (full sig)");
-        hooks_installed++;
-    } else if (create_hook(signatures::CAMERA_ZOOM_FOV_NONWILD, "CameraZoomFOV",
-                           hooks::camera_detour, hooks::camera_hook)) {
-        spdlog::info("Installed CameraZoomFOV hook (non-wildcard sig)");
-        hooks_installed++;
+        try_hook_pair(signatures::ANIM_EVALUATOR, nullptr,
+                      "AnimationEvaluator",
+                      hooks::animation_evaluator_detour, hooks::animation_evaluator_hook, false);
+
+        try_hook_pair(signatures::DRAGON_TIMER, nullptr,
+                      "DragonHpProbe",
+                      hooks::dragon_hp_probe_detour, hooks::dragon_hp_probe_hook, false);
     } else {
-        spdlog::warn("Failed to install CameraZoomFOV hook - co-op camera tether disabled");
-        hooks_failed++;
+        spdlog::debug("Experimental hooks disabled (stable mode)");
     }
 
-    spdlog::info("Hook installation complete: {} installed, {} failed", hooks_installed, hooks_failed);
-    if (hooks_failed > 0) {
+    // --- WorldSystem sibling probe (opt-in) ---
+    if (cfg.dump_world_system_probe && get_runtime_offsets().world_system_resolved) {
+        scan_world_system_siblings();
+    }
+
+    spdlog::info("Hook installation complete: {} installed, {} failed",
+                 status_.installed, status_.failed);
+    if (status_.failed > 0) {
         spdlog::warn("Some hooks failed - game version may have changed.");
         spdlog::warn("Try updating signatures. See docs/REVERSE_ENGINEERING.md");
+        for (const auto& name : status_.failed_names) {
+            spdlog::warn("  failed: {}", name);
+        }
     }
 
     initialized_ = true;
@@ -154,9 +181,63 @@ void HookManager::shutdown() {
     hooks::companion_spawn_hook = {};
     hooks::world_state_hook = {};
     hooks::camera_hook = {};
+    hooks::animation_evaluator_hook = {};
+    hooks::dragon_hp_probe_hook = {};
 
     initialized_ = false;
     spdlog::info("All hooks removed");
+}
+
+void HookManager::scan_world_system_siblings() {
+    auto& rt = get_runtime_offsets();
+    if (!rt.world_system_resolved || rt.world_probe_ran) return;
+
+    auto logger = worldprobe_logger();
+    if (!logger) {
+        spdlog::warn("WorldSystem probe skipped (logger unavailable)");
+        return;
+    }
+
+    logger->info("==== WorldSystem probe begin ====");
+    logger->info("ws_ptr = 0x{:X} (RVA 0x{:X})",
+                 rt.world_system_ptr, rt.world_system_ptr - game_base_);
+
+    constexpr uint32_t kStart = 0x30;
+    constexpr uint32_t kEnd   = 0x100;
+    constexpr uint32_t kStep  = 0x08; // pointer-aligned
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    for (uint32_t off = kStart; off < kEnd; off += kStep) {
+        uintptr_t slot_addr = rt.world_system_ptr + off;
+        // Bounded VirtualQuery sanity check.
+        if (VirtualQuery(reinterpret_cast<void*>(slot_addr), &mbi, sizeof(mbi)) == 0)
+            continue;
+        if (!(mbi.State & MEM_COMMIT)) continue;
+
+        uintptr_t sibling = *reinterpret_cast<uintptr_t*>(slot_addr);
+        if (!is_valid_ptr(sibling)) continue;
+
+        if (VirtualQuery(reinterpret_cast<void*>(sibling), &mbi, sizeof(mbi)) == 0)
+            continue;
+        if (!(mbi.State & MEM_COMMIT)) continue;
+
+        uintptr_t vtable = *reinterpret_cast<uintptr_t*>(sibling);
+        uintptr_t vtable_rva = (vtable >= game_base_ && vtable < game_base_ + game_size_)
+                               ? vtable - game_base_ : 0;
+
+        logger->info("ws+0x{:02X}: sibling=0x{:X} vtable=0x{:X} (RVA 0x{:X})",
+                     off, sibling, vtable, vtable_rva);
+
+        // Best-effort heuristic caching. These are stored as "candidates"
+        // only; the names are community guesses and may be wrong.
+        if (rt.quest_manager_candidate == 0)               rt.quest_manager_candidate = sibling;
+        else if (rt.cutscene_manager_candidate == 0)       rt.cutscene_manager_candidate = sibling;
+        else if (rt.world_object_manager_candidate == 0)   rt.world_object_manager_candidate = sibling;
+    }
+
+    logger->info("==== WorldSystem probe end ====");
+    logger->flush();
+    rt.world_probe_ran = true;
 }
 
 SigScanResult HookManager::sig_scan(const std::string& pattern, const std::string& name) {
@@ -465,6 +546,55 @@ void __cdecl camera_detour(void* camera_struct, void* unused) {
         if (target_zoom > current_fov) {
             write_mem<float>(camera_addr, offsets::Camera::ZOOM_FOV, target_zoom);
         }
+    }
+}
+
+void __cdecl animation_evaluator_detour(void* evaluator) {
+    animation_evaluator_hook.call<void>(evaluator);
+
+    auto evaluator_addr = reinterpret_cast<uintptr_t>(evaluator);
+    if (!is_valid_ptr(evaluator_addr)) return;
+
+    auto& rt = get_runtime_offsets();
+    if (rt.animation_evaluator_ptr != evaluator_addr) {
+        rt.animation_evaluator_ptr = evaluator_addr;
+        rt.animation_evaluator_resolved = true;
+        // One-shot log so users see the evaluator was captured.
+        static std::atomic<bool> logged{false};
+        bool expected = false;
+        if (logged.compare_exchange_strong(expected, true)) {
+            spdlog::info("AnimationEvaluator captured at 0x{:X} (experimental hook)",
+                         evaluator_addr);
+        }
+    }
+}
+
+void __cdecl dragon_hp_probe_detour(void* dragon_marker) {
+    dragon_hp_probe_hook.call<void>(dragon_marker);
+
+    auto marker_addr = reinterpret_cast<uintptr_t>(dragon_marker);
+    if (!is_valid_ptr(marker_addr)) return;
+
+    auto& rt = get_runtime_offsets();
+    rt.dragon_marker_ptr = marker_addr;
+
+    // Only run the scan once per mount session. dragon_hp_offset stays
+    // non-zero after the first successful scan until hookmgr shutdown.
+    if (rt.dragon_hp_resolved) return;
+
+    uint32_t off = dynamic_scan_float(
+        marker_addr,
+        offsets::Mount::DRAGON_HP_SCAN_MIN_OFFSET,
+        offsets::Mount::DRAGON_HP_SCAN_MAX_OFFSET,
+        offsets::Mount::DRAGON_HP_SCAN_STRIDE,
+        offsets::Mount::DRAGON_HP_PLAUSIBLE_MIN,
+        offsets::Mount::DRAGON_HP_PLAUSIBLE_MAX);
+
+    if (off != 0) {
+        rt.dragon_hp_offset = off;
+        rt.dragon_hp_resolved = true;
+        float v = *reinterpret_cast<float*>(marker_addr + off);
+        spdlog::info("Dragon HP resolved at marker+0x{:X} (initial value {})", off, v);
     }
 }
 

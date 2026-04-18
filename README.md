@@ -2,9 +2,20 @@
 
 A co-op multiplayer mod for [Crimson Desert](https://store.steampowered.com/app/3321460/Crimson_Desert/) that allows two players to play through the game together. The host player's game world is shared with a second player who joins via Steam P2P networking.
 
-> **Status: In Development - Core Systems Functional**
+> **Status: 0.2.0 In Development - Core Systems Functional, Research Hooks Opt-In**
 >
-> Player position sync, companion hijacking, damage tracking, enemy HP sync, DX12 overlay, and Steam P2P networking all work with verified offsets. Animation sync is in passthrough mode (same-model only). Quest sync, cutscene sync, and world interaction sync are **not yet implemented** - they need reverse engineering work. See [Current Limitations](#current-limitations) and [Contributing](#contributing).
+> Player position sync, companion hijacking, damage tracking, enemy HP sync, DX12 overlay, and Steam P2P networking all work with verified offsets. Animation sync defaults to passthrough but will switch to a CDAnimCancel-derived evaluator hook when `enable_experimental_hooks` is set. Dragon HP is resolved on the fly via a float-plausibility scan at first dragon mount. Quest sync, cutscene sync, and world interaction sync are **still not applied server-side** - set `dump_world_system_probe` to generate telemetry that identifies the manager pointers. See [What's New in 0.2.0](#whats-new-in-020), [Current Limitations](#current-limitations), and [Contributing](#contributing).
+
+## What's New in 0.2.0
+
+- **Animation evaluator hook (experimental)** - A new hook based on [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel)'s research captures the real animation evaluator struct. When captured, `AnimationSync` writes to `evaluator+0x00 / +0x04` (state / blend) instead of the deprecated `actor+0x120 / +0x124` fields that the community has shown to be inert.
+- **Dragon HP auto-scan** - On first dragon mount the mod walks `marker+0x08..+0x200` looking for a plausible float HP value (100 <= v <= 1e7). The chosen offset is cached in `RuntimeOffsets::dragon_hp_offset` and surfaced in the debug overlay. Read-only, no writes.
+- **WorldSystem sibling probe** - With `dump_world_system_probe = true`, the mod walks `WorldSystem+0x30..+0x100` and logs every sibling pointer's vtable RVA to `cdcoop_world_probe.log`. This is telemetry to help the community identify the quest / cutscene / world-object managers. Best-guess candidates are cached in `RuntimeOffsets` for on-demand use.
+- **Hook-install telemetry** - `HookManager::status()` now exposes `installed / failed` counts and the list of hook names that succeeded vs. failed. The debug overlay surfaces this so users on a new game patch can see at a glance which signature broke.
+- **Primary/fallback signature try-helper** - `try_hook_pair()` cleaned up the repetitive primary/fallback install blocks and standardised the logging prefix.
+- **Config gating** - Experimental behavior is opt-in via two new flags: `enable_experimental_hooks` (default `false`) and `dump_world_system_probe` (default `false`). Default install keeps today's stable behavior.
+- **MSVC /W4 + /permissive- on cdcoop_core** - Tightened compiler warnings to catch common issues in project sources without affecting third-party deps.
+- **Offset cleanup** - The estimated actor animation offsets (`0x120 / 0x124 / 0x130 / 0x131`, etc.) are kept but clearly marked `DEPRECATED` in `game_structures.h`. The new canonical path is `offsets::AnimationEvaluator::*`. Stamina/spirit offset relationship (`entry + CURRENT_VALUE`) is now documented inline.
 
 ## How It Works
 
@@ -36,17 +47,17 @@ A co-op multiplayer mod for [Crimson Desert](https://store.steampowered.com/app/
 
 ## Current Limitations
 
-These are features that are **not yet working** and require reverse engineering or community contribution:
+These features are **still not fully functional in-game** and need further research or live-process testing:
 
 | Feature | Status | What's Blocking It |
 |---------|--------|--------------------|
-| Animation sync (cross-model) | Passthrough only | Animation system uses .paac action charts, not simple memory offsets. IDs need PAZ extraction. Works when both players use the same character model |
-| Quest sync | Not implemented | Quest manager pointer not found within WorldSystem |
-| Cutscene sync | Not implemented | Cutscene manager/trigger function not found |
-| World interaction sync | Event logging only | World object manager layout unknown |
-| Dragon mount HP | Unresolved | Confirmed float type (not int64*1000), but pointer chain unknown |
-| Per-action combat flags | Estimated only | isAttacking (0x130) and isDodging (0x131) not verified |
-| Full camera struct | Zoom/FOV only | Camera mods use PAZ XML, not runtime memory. Only +0xD8 is mapped |
+| Animation sync (cross-model) | Passthrough only (0.1.x behavior) + evaluator write path (experimental) | Per-model animation IDs still need PAZ extraction for true remap. The evaluator hook captures the right struct but the ID namespace differs per character model |
+| Quest sync | Receive-side stub + candidate pointer logging | Quest manager identity is now probed - set `dump_world_system_probe=true`, reproduce progress on host, and send `cdcoop_world_probe.log` to the issue tracker |
+| Cutscene sync | Receive-side stub + candidate pointer logging | Same probe as above. Trigger function still unknown |
+| World interaction sync | Receive-side stub + candidate pointer logging | Same probe as above |
+| Dragon mount HP | Dynamically resolved at first mount (experimental) | Auto-scan picks a plausible float. Value surfaces in the debug overlay - verify against in-game HP bar and report back if wrong |
+| Per-action combat flags | Evaluator `+0x6A` flag captured (experimental) | Works only when evaluator hook is enabled and a combat action is active. Actor-base `0x130 / 0x131` stay deprecated |
+| Full camera struct | Zoom/FOV only | Camera mods use PAZ XML, not runtime memory. Only `+0xD8` is mapped |
 
 ## Building
 
@@ -143,6 +154,9 @@ Edit `cdcoop_config.json` in the game directory. The file is auto-created with d
     "log_packets": false,
     "log_level": 2,
 
+    "enable_experimental_hooks": false,
+    "dump_world_system_probe": false,
+
     "toggle_overlay_key": 119,
     "open_session_key": 118
 }
@@ -154,14 +168,16 @@ Edit `cdcoop_config.json` in the game directory. The file is auto-created with d
 | `enemy_hp_multiplier` | `1.5` | Scale enemy HP for 2 players |
 | `enemy_dmg_multiplier` | `1.0` | Scale enemy damage |
 | `tether_distance` | `150.0` | Max distance between players (meters) |
-| `sync_cutscenes` | `false` | Cutscene sync (not yet implemented) |
-| `sync_quest_progress` | `false` | Quest sync (not yet implemented) |
+| `sync_cutscenes` | `false` | Cutscene sync (receive-side still stubbed) |
+| `sync_quest_progress` | `false` | Quest sync (receive-side still stubbed) |
 | `skip_animation_remap` | `true` | Use passthrough mode for animation sync |
 | `player2_model_id` | `-1` | -1 = same as host character model |
 | `player2_use_companion_slot` | `true` | Hijack companion vs spawn new entity |
-| `debug_overlay` | `false` | Show debug info in overlay |
+| `debug_overlay` | `false` | Show debug info + hook status in overlay |
 | `log_packets` | `false` | Log network packets to cdcoop.log |
 | `log_level` | `2` | 0=trace, 1=debug, 2=info, 3=warn, 4=error |
+| `enable_experimental_hooks` | `false` | Install CDAnimCancel animation-evaluator hook and dragon HP probe. Disable if mod becomes unstable after a game patch |
+| `dump_world_system_probe` | `false` | Walk WorldSystem sibling pointers once after resolve and log their vtable RVAs to `cdcoop_world_probe.log`. Safe, read-only telemetry |
 | `toggle_overlay_key` | `119` | F8 keycode |
 | `open_session_key` | `118` | F7 keycode |
 
@@ -199,15 +215,14 @@ These are the remaining offsets/systems needed. **If you have access to any of t
 
 | # | Priority | System | What We Need | Status |
 |---|----------|--------|--------------|--------|
-| 1 | **HIGH** | Animation System | Animation runs via .paac action charts, not simple actor offsets. Offsets 0x120/0x124 may not be correct. See [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) research | Estimated - likely wrong approach |
-| 2 | **HIGH** | Animation IDs | Extract animation paths from .paac files (428 .paa refs in sword_upper.paac alone). CDAnimCancel has `extract_paac.py` parser | Passthrough mode for MVP |
-| 3 | **MEDIUM** | Quest Manager | Find quest manager pointer within WorldSystem or a nearby singleton | Not started |
-| 4 | **MEDIUM** | Cutscene Manager | Find the function/manager that triggers cutscenes | Not started |
-| 5 | **MEDIUM** | Camera State | Map camera struct beyond zoom (+0xD8) - position, rotation, target | Partial (zoom only) |
-| 6 | **MEDIUM** | Dragon HP | Dragon mount health offset (confirmed float type, not int64*1000) | Unresolved |
-| 7 | **LOW** | World Objects | Find manager for doors, chests, interactive world objects | Not started |
-| 8 | **LOW** | Teleport System | Hook fast travel to sync both players to same destination | Not started |
-| 9 | **LOW** | Combat Flags | Per-action flags at actor+0x130/0x131 are unverified by entire community. CDAnimCancel found evaluator flag at `[rbx+0x6A]` but that's on evaluator struct, not actor | Estimated |
+| 1 | **HIGH** | Animation IDs per model | Extract animation paths from .paac files (428 `.paa` refs in `sword_upper.paac` alone). [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) has an `extract_paac.py` parser. Needed for true cross-model remap | Evaluator hook exists (experimental) but the ID namespace is still same-model-only |
+| 2 | **MEDIUM** | Quest Manager | Confirm which WorldSystem sibling slot from `cdcoop_world_probe.log` is the quest manager, then identify its "set stage" entry function | Probe scaffolding landed; waiting on community log submissions |
+| 3 | **MEDIUM** | Cutscene Manager | Same probe approach; find the cutscene trigger function | Probe scaffolding landed; waiting on logs |
+| 4 | **MEDIUM** | Camera State | Map camera struct beyond zoom (`+0xD8`) - position, rotation, target | Partial (zoom only) |
+| 5 | **MEDIUM** | Dragon HP verification | Verify the float offset picked by the 0.2.0 dynamic scan matches in-game HP. If wrong, widen / tighten the plausibility range in `Mount::DRAGON_HP_PLAUSIBLE_*` | Auto-scan lands a value but needs confirmation |
+| 6 | **LOW** | World Objects | Confirm WorldSystem sibling for doors / chests / interactive world objects | Probe candidate stored but not yet mapped to a dispatch function |
+| 7 | **LOW** | Teleport System | Hook fast travel to sync both players to same destination | Not started |
+| 8 | **LOW** | Combat Flag verification | The evaluator `+0x6A` flag from CDAnimCancel now writes when experimental hooks are enabled - confirm it actually gates co-op combat state the way we want | New hook needs field testing |
 
 #### Where to Look
 
