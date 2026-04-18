@@ -21,6 +21,10 @@ set(STEAMWORKS_SDK_PATH "" CACHE PATH "Path to Steamworks SDK")
 include(FetchContent)
 
 # safetyhook - mid-function hooking library (same as CrimsonDesert-player-status-modifier)
+# Tell safetyhook to fetch Zydis itself; otherwise the build fails with
+# "#error Zydis not found" because safetyhook's inline_hook.cpp requires it
+# and we don't provide a system-installed copy.
+set(SAFETYHOOK_FETCH_ZYDIS ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     safetyhook
     GIT_REPOSITORY https://github.com/cursey/safetyhook.git
