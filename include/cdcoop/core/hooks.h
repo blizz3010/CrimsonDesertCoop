@@ -56,6 +56,23 @@ public:
         return create_hook(result.address, detour, hook);
     }
 
+    // Mid-function hook (preserves all registers, gives detour direct
+    // access to them via SafetyHookContext). Use this for injection sites
+    // where the calling convention doesn't apply — e.g. arbitrary mov
+    // instructions in the middle of a function.
+    bool create_mid_hook(uintptr_t target, safetyhook::MidHookFn detour,
+                         SafetyHookMid& hook) {
+        hook = safetyhook::create_mid(reinterpret_cast<void*>(target), detour);
+        return hook.operator bool();
+    }
+
+    bool create_mid_hook(const std::string& signature, const std::string& name,
+                         safetyhook::MidHookFn detour, SafetyHookMid& hook) {
+        auto result = sig_scan(signature, name);
+        if (!result) return false;
+        return create_mid_hook(result.address, detour, hook);
+    }
+
     uintptr_t game_base() const { return game_base_; }
     size_t game_size() const { return game_size_; }
 
@@ -125,6 +142,14 @@ void __cdecl animation_evaluator_detour(void* evaluator);
 // Gated behind Config::enable_experimental_hooks.
 inline SafetyHookInline dragon_hp_probe_hook;
 void __cdecl dragon_hp_probe_detour(void* dragon_marker);
+
+// Map waypoint / fast-travel apply (mid-hook). Reads r15 (source waypoint
+// struct) at the apply site and broadcasts a TeleportPacket to the peer
+// when the local player is the host. The detour is a no-op when the
+// session is inactive or the local role is CLIENT, so installing the hook
+// outside a session is safe. Gated behind Config::sync_fast_travel.
+inline SafetyHookMid teleport_waypoint_hook;
+void teleport_waypoint_detour(SafetyHookContext& ctx);
 
 // NOTE: Game tick is driven by the DX12 Present hook (imgui_impl_dx12.cpp),
 // which calls sync systems directly each frame. No dedicated game tick hook needed.

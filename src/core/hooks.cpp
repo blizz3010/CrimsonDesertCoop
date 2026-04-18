@@ -3,6 +3,7 @@
 #include <cdcoop/core/game_structures.h>
 #include <cdcoop/core/config.h>
 #include <cdcoop/network/session.h>
+#include <cdcoop/network/packet.h>
 #include <cdcoop/sync/player_sync.h>
 #include <cdcoop/sync/enemy_sync.h>
 #include <cdcoop/sync/world_sync.h>
@@ -152,6 +153,23 @@ bool HookManager::initialize() {
         spdlog::debug("Experimental hooks disabled (stable mode)");
     }
 
+    // --- Map waypoint / fast-travel mid-hook (opt-in) ---
+    // Captures the host's fast-travel target so we can notify the peer.
+    // Mid-hook so the detour can read r15 (source waypoint struct) directly.
+    if (cfg.sync_fast_travel) {
+        auto sig = sig_scan(signatures::TELEPORT_WAYPOINT, "TeleportWaypoint");
+        if (sig && create_mid_hook(sig.address, hooks::teleport_waypoint_detour,
+                                    hooks::teleport_waypoint_hook)) {
+            spdlog::info("Installed TeleportWaypoint mid-hook");
+            status_.installed++;
+            status_.installed_names.emplace_back("TeleportWaypoint (mid)");
+        } else {
+            spdlog::warn("Failed to install TeleportWaypoint hook");
+            status_.failed++;
+            status_.failed_names.emplace_back("TeleportWaypoint");
+        }
+    }
+
     // --- WorldSystem sibling probe (opt-in) ---
     if (cfg.dump_world_system_probe && get_runtime_offsets().world_system_resolved) {
         scan_world_system_siblings();
@@ -183,6 +201,7 @@ void HookManager::shutdown() {
     hooks::camera_hook = {};
     hooks::animation_evaluator_hook = {};
     hooks::dragon_hp_probe_hook = {};
+    hooks::teleport_waypoint_hook = {};
 
     initialized_ = false;
     spdlog::info("All hooks removed");
@@ -421,7 +440,6 @@ void __cdecl player_position_detour(void* player, float x, float y, float z) {
         Vec3 pos{x, y, z};
         // Read rotation from the player actor via the verified pointer chain
         Quat rot{0, 0, 0, 1};
-        auto& rt = get_runtime_offsets();
         if (is_valid_ptr(rt.player_actor_ptr)) {
             uintptr_t player_core = resolve_ptr_chain(rt.player_actor_ptr, {
                 offsets::Player::ACTOR_TO_INNER, offsets::Player::INNER_TO_CORE
@@ -596,6 +614,33 @@ void __cdecl dragon_hp_probe_detour(void* dragon_marker) {
         float v = *reinterpret_cast<float*>(marker_addr + off);
         spdlog::info("Dragon HP resolved at marker+0x{:X} (initial value {})", off, v);
     }
+}
+
+void teleport_waypoint_detour(SafetyHookContext& ctx) {
+    // Mid-hook at CrimsonDesert.exe+0xAB5594 (movsd [r14+0xD8], xmm0).
+    // r15 = source waypoint struct, layout (from bbfox CT 174-176):
+    //   r15+0x00 (word)   waypoint type id
+    //   r15+0x1C (double) packed (X float, Y float)
+    //   r15+0x24 (float)  Z
+    if (!is_valid_ptr(ctx.r15)) return;
+
+    auto* src = reinterpret_cast<const uint8_t*>(ctx.r15);
+    float x = *reinterpret_cast<const float*>(src + offsets::Teleport::SRC_WAYPOINT_XY);
+    float y = *reinterpret_cast<const float*>(src + offsets::Teleport::SRC_WAYPOINT_XY + 4);
+    float z = *reinterpret_cast<const float*>(src + offsets::Teleport::SRC_WAYPOINT_Z);
+    uint16_t type_id = *reinterpret_cast<const uint16_t*>(src);
+
+    // Only the host broadcasts. Both sides hit this hook when fast-travelling
+    // locally, but sending from a client would create a feedback loop.
+    auto& session = Session::instance();
+    if (!session.is_active() || !session.is_host()) {
+        spdlog::debug("Teleport hook fired (not host, no broadcast): type=0x{:X} pos=({},{},{})",
+                      type_id, x, y, z);
+        return;
+    }
+
+    spdlog::info("Teleport waypoint captured: type=0x{:X} dest=({},{},{})", type_id, x, y, z);
+    WorldSync::instance().on_teleport_trigger({x, y, z}, type_id);
 }
 
 } // namespace hooks

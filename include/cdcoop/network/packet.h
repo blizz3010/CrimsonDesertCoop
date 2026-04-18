@@ -32,6 +32,7 @@ enum class PacketType : uint8_t {
     QUEST_UPDATE        = 0x31,
     CUTSCENE_TRIGGER    = 0x32,
     LOOT_DROP           = 0x33,
+    TELEPORT_TRIGGER    = 0x34,
 
     // System
     CONFIG_SYNC         = 0xF0,
@@ -108,6 +109,15 @@ struct WorldInteractPacket {
     uint32_t object_id;
     uint32_t interaction_type;
     uint32_t new_state;
+};
+
+// Fast-travel waypoint snapshot. Captured on the host at the
+// waypoint-apply injection site (CrimsonDesert.exe+0xAB5594) and
+// broadcast so the client knows the host is teleporting.
+struct TeleportPacket {
+    PacketHeader header;
+    Vec3 destination;        // World-space waypoint (X, Y, Z)
+    uint32_t waypoint_type;  // From [r15+0x00] — waypoint type id
 };
 
 struct HandshakePacket {

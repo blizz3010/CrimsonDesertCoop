@@ -29,6 +29,11 @@ void WorldSync::initialize() {
             on_remote_cutscene(data, size);
         });
 
+    session.register_handler(PacketType::TELEPORT_TRIGGER,
+        [this](PacketType, const uint8_t* data, size_t size) {
+            on_remote_teleport(data, size);
+        });
+
     spdlog::info("WorldSync initialized");
 }
 
@@ -78,6 +83,22 @@ void WorldSync::on_cutscene_trigger(uint32_t cutscene_id) {
     spdlog::debug("Cutscene trigger sent (receive-side stub): {}", cutscene_id);
 }
 
+void WorldSync::on_teleport_trigger(const Vec3& destination, uint32_t waypoint_type) {
+    // The teleport hook detour gates send-side on host already, but keep the
+    // belt-and-suspenders check here in case anything else calls this method.
+    if (!Session::instance().is_host()) return;
+
+    TeleportPacket pkt{};
+    pkt.header.type = PacketType::TELEPORT_TRIGGER;
+    pkt.header.payload_size = sizeof(pkt) - sizeof(PacketHeader);
+    pkt.destination = destination;
+    pkt.waypoint_type = waypoint_type;
+
+    Session::instance().send_packet(pkt, true);
+    spdlog::debug("Teleport trigger sent: type=0x{:X} dest=({},{},{})",
+                  waypoint_type, destination.x, destination.y, destination.z);
+}
+
 // --- Private ---
 
 void WorldSync::on_remote_interact(const uint8_t* data, size_t size) {
@@ -110,6 +131,20 @@ void WorldSync::on_remote_cutscene(const uint8_t* data, size_t size) {
     auto& rt = get_runtime_offsets();
     spdlog::debug("Cutscene trigger received (stub): {}, candidate_mgr=0x{:X}",
                   pkt->object_id, rt.cutscene_manager_candidate);
+}
+
+void WorldSync::on_remote_teleport(const uint8_t* data, size_t size) {
+    if (size < sizeof(TeleportPacket)) return;
+    auto* pkt = reinterpret_cast<const TeleportPacket*>(data);
+
+    // Apply path is intentionally log-only for now. The proper apply
+    // function (the one that consumes [r14+0xD8] / [r14+0xE0] and produces
+    // a real area transition) is unidentified. The 30Hz position broadcast
+    // already pulls the client-controlled companion entity along once the
+    // host arrives, so this notification is informational while we look
+    // for the apply function. See docs/RESEARCH_2026-04-18.md #7.
+    spdlog::info("Host fast-travel announced: type=0x{:X} dest=({},{},{}) — apply pending",
+                 pkt->waypoint_type, pkt->destination.x, pkt->destination.y, pkt->destination.z);
 }
 
 } // namespace cdcoop

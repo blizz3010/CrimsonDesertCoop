@@ -24,12 +24,16 @@ public:
     // Cutscene triggered
     void on_cutscene_trigger(uint32_t cutscene_id);
 
+    // Local player initiated fast-travel; host broadcasts to peer
+    void on_teleport_trigger(const Vec3& destination, uint32_t waypoint_type);
+
 private:
     WorldSync() = default;
 
     void on_remote_interact(const uint8_t* data, size_t size);
     void on_remote_quest_update(const uint8_t* data, size_t size);
     void on_remote_cutscene(const uint8_t* data, size_t size);
+    void on_remote_teleport(const uint8_t* data, size_t size);
 };
 
 } // namespace cdcoop

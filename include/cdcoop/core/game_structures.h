@@ -913,6 +913,38 @@ namespace signatures {
     constexpr const char* ANIM_EVALUATOR =
         "0F 28 CE 48 89 4C 24 20 48 8B CB E8";
     constexpr int ANIM_EVALUATOR_OFFSET = 0;
+
+    // --- Map Waypoint / Fast-Travel Apply (from bbfox0703 CT entries 174-176) ---
+    // Mid-function injection at CrimsonDesert.exe+0xAB5594. At hook time:
+    //   r14 = destination entity, r15 = source waypoint struct
+    //   xmm0 already loaded with packed (X, Y) from [r15+0x1C]
+    //   eax about to be loaded from [r15+0x24] for the Z write
+    // The hook fires for both host- and client-initiated fast-travel; gate
+    // broadcasts on Session::is_host() in the detour. Mid-hook is required
+    // so we can read r15 directly — calling-convention args don't apply
+    // mid-function.
+    constexpr const char* TELEPORT_WAYPOINT =
+        "F2 41 0F 11 86 D8 00 00 00 ?? ?? ?? ?? 41 89 86 E0 00 00 00";
+    constexpr int TELEPORT_WAYPOINT_OFFSET = 0;
+
+    // --- Mount Pointer Capture (from Orcax-1399 player-status-modifier) ---
+    // Function entry that takes the mount entity through a sequence of
+    // pointer dereferences ending at +0x30. AOB targets a stable prologue
+    // and the +20 hook offset captures the mount this-pointer for
+    // downstream stat reads (HP, stamina). Useful as an alternative to
+    // the static-base + chain resolution in offsets::Mount.
+    // Source: https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier
+    constexpr const char* MOUNT_PTR_CAPTURE =
+        "48 8B C7 49 8B 7D 08 80 BF 94 00 00 00 00 0F 85 ?? ?? ?? ?? 48 8B 47 68 48 8B 48 20 48 83 C1 30 E8 ?? ?? ?? ?? 66 83 B8 E4 00 00 00 00";
+    constexpr int MOUNT_PTR_CAPTURE_OFFSET = 20;
+
+    // --- Mount Stamina ("AB00") Access (from Orcax-1399) ---
+    // Hook site that reads/writes the mount stamina ("AB00") stat. Not
+    // yet wired into our sync path; documented for future mount-stamina
+    // co-op sync.
+    constexpr const char* MOUNT_STAMINA_ACCESS =
+        "0F B7 D7 49 8B CE E8 ?? ?? ?? ?? 48 8B F0 48 85 DB 74 ?? 33 C0 66 89 44 24 20 38 46 53";
+    constexpr int MOUNT_STAMINA_ACCESS_OFFSET = 11;
 }
 
 // =========================================================================
