@@ -2,6 +2,7 @@
 #include <cdcoop/network/session.h>
 #include <cdcoop/player/player_manager.h>
 #include <cdcoop/sync/player_sync.h>
+#include <cdcoop/sync/mount_sync.h>
 #include <cdcoop/core/config.h>
 #include <cdcoop/core/game_structures.h>
 #include <cdcoop/core/hooks.h>
@@ -102,6 +103,28 @@ void Overlay::render_session_panel() {
             ImGui::Text("Connected to: %s", session.peer_name().c_str());
             ImGui::Text("Ping: %.0f ms", session.ping_ms());
             ImGui::Text("Role: %s", session.is_host() ? "Host" : "Client");
+
+            // Peer mount HP / stamina — only shown when the peer is
+            // actually mounted, to avoid cluttering the panel.
+            const auto& remote_mount = MountSync::instance().remote_state();
+            if (remote_mount.is_mounted) {
+                ImGui::Separator();
+                ImGui::Text("Peer's Mount");
+                char label[48];
+                if (remote_mount.max_health > 0) {
+                    snprintf(label, sizeof(label), "HP %.0f / %.0f",
+                             remote_mount.health, remote_mount.max_health);
+                    ImGui::ProgressBar(remote_mount.health / remote_mount.max_health,
+                                       ImVec2(200, 0), label);
+                }
+                if (remote_mount.max_stamina > 0) {
+                    snprintf(label, sizeof(label), "ST %.0f / %.0f",
+                             remote_mount.stamina, remote_mount.max_stamina);
+                    ImGui::ProgressBar(remote_mount.stamina / remote_mount.max_stamina,
+                                       ImVec2(200, 0), label);
+                }
+            }
+
             ImGui::Separator();
             if (ImGui::Button("Disconnect")) {
                 session.leave_session();
@@ -161,6 +184,27 @@ void Overlay::render_debug_panel() {
                     read_mem<float>(rt.dragon_marker_ptr, rt.dragon_hp_offset));
     } else {
         ImGui::Text("Dragon HP: not resolved (mount a dragon first)");
+    }
+
+    const auto& local_mount  = MountSync::instance().local_state();
+    const auto& remote_mount = MountSync::instance().remote_state();
+    if (rt.mount_resolved) {
+        ImGui::Text("Local mount: 0x%llX (%s)",
+                    static_cast<unsigned long long>(rt.mount_ptr),
+                    local_mount.is_mounted ? "MOUNTED" : "dismounted");
+        if (local_mount.is_mounted) {
+            ImGui::Text("  HP %.0f/%.0f  ST %.0f/%.0f",
+                        local_mount.health, local_mount.max_health,
+                        local_mount.stamina, local_mount.max_stamina);
+        }
+    } else {
+        ImGui::Text("Mount: not captured (mount something first)");
+    }
+    if (remote_mount.is_mounted) {
+        ImGui::Text("Remote mount: type=0x%X HP %.0f/%.0f  ST %.0f/%.0f",
+                    remote_mount.mount_type_hash,
+                    remote_mount.health, remote_mount.max_health,
+                    remote_mount.stamina, remote_mount.max_stamina);
     }
     if (rt.world_probe_ran) {
         ImGui::Text("WS probe: ran (see cdcoop_world_probe.log)");

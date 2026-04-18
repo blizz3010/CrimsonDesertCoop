@@ -974,6 +974,14 @@ struct RuntimeOffsets {
     uintptr_t dragon_marker_ptr = 0;
     uint32_t  dragon_hp_offset = 0;       // 0 = not yet resolved
 
+    // Generic mount pointer captured by the Orcax MOUNT_PTR_CAPTURE hook.
+    // Non-zero while the local player is mounted on anything (horse,
+    // dragon, etc). The mount entity uses the same actor+0x58 stats
+    // component layout as player/enemy, so we read HP/stamina from it via
+    // the StatEntry pattern.
+    uintptr_t mount_ptr = 0;
+    bool      mount_resolved = false;
+
     // WorldSystem sibling probe results. When the experimental world-system
     // probe runs, it logs the vtable RTTI of every non-null sibling pointer
     // within WorldSystem+0x30..0x100. Best-guess candidates for the three

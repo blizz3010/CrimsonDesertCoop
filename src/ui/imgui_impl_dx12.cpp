@@ -13,6 +13,7 @@
 #include <cdcoop/sync/player_sync.h>
 #include <cdcoop/sync/enemy_sync.h>
 #include <cdcoop/sync/world_sync.h>
+#include <cdcoop/sync/mount_sync.h>
 #include <cdcoop/player/player_manager.h>
 #include <spdlog/spdlog.h>
 
@@ -232,6 +233,9 @@ static HRESULT __stdcall present_detour(IDXGISwapChain* swap_chain, UINT sync_in
             cdcoop::EnemySync::instance().update(delta_time);
             cdcoop::WorldSync::instance().update(delta_time);
         }
+        // MountSync polls the local mount pointer even outside a session
+        // so the debug overlay can show local mount HP for verification.
+        cdcoop::MountSync::instance().update(delta_time);
         cdcoop::PlayerManager::instance().update(delta_time);
 
         // Hotkey processing

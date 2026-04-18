@@ -151,6 +151,15 @@ void __cdecl dragon_hp_probe_detour(void* dragon_marker);
 inline SafetyHookMid teleport_waypoint_hook;
 void teleport_waypoint_detour(SafetyHookContext& ctx);
 
+// Mount pointer capture (mid-hook, from Orcax-1399 scanner.cpp).
+// Fires on the game path that resolves the mount entity; at hook offset
+// +20 inside the AOB, `rdi` holds the mount entity this-pointer. The
+// detour caches this pointer in RuntimeOffsets::mount_ptr so the
+// MountSync polling loop can read HP/stamina via the standard actor
+// stats component. Gated behind Config::sync_mount_state.
+inline SafetyHookMid mount_ptr_capture_hook;
+void mount_ptr_capture_detour(SafetyHookContext& ctx);
+
 // NOTE: Game tick is driven by the DX12 Present hook (imgui_impl_dx12.cpp),
 // which calls sync systems directly each frame. No dedicated game tick hook needed.
 

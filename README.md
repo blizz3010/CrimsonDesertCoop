@@ -2,9 +2,13 @@
 
 A co-op multiplayer mod for [Crimson Desert](https://store.steampowered.com/app/3321460/Crimson_Desert/) that allows two players to play through the game together. The host player's game world is shared with a second player who joins via Steam P2P networking.
 
-> **Status: 0.2.1 In Development - Core Systems Functional, Research Hooks Opt-In**
+> **Status: 0.2.2 In Development - Core Systems Functional, Research Hooks Opt-In**
 >
-> Player position sync, companion hijacking, damage tracking, enemy HP sync, DX12 overlay, and Steam P2P networking all work with verified offsets. Animation sync defaults to passthrough but will switch to a CDAnimCancel-derived evaluator hook when `enable_experimental_hooks` is set. Dragon HP is resolved on the fly via a float-plausibility scan at first dragon mount. The fast-travel mid-hook can now capture the host's waypoint targets when `sync_fast_travel` is enabled — the apply path on the receiver is still log-only pending field testing. Quest sync, cutscene sync, and world interaction sync remain **not applied server-side** - set `dump_world_system_probe` to generate telemetry that identifies the manager pointers. See [What's New in 0.2.1](#whats-new-in-021), [Current Limitations](#current-limitations), and [Contributing](#contributing).
+> Player position sync, companion hijacking, damage tracking, enemy HP sync, DX12 overlay, and Steam P2P networking all work with verified offsets. Animation sync defaults to passthrough but will switch to a CDAnimCancel-derived evaluator hook when `enable_experimental_hooks` is set. Dragon HP is resolved on the fly via a float-plausibility scan at first dragon mount. The fast-travel mid-hook captures the host's waypoint targets when `sync_fast_travel` is enabled — the apply path on the receiver is still log-only pending field testing. Mount HP / stamina now broadcasts both ways when `sync_mount_state` is enabled so each player sees the other's mount status in the overlay. Quest sync, cutscene sync, and world interaction sync remain **not applied server-side** - set `dump_world_system_probe` to generate telemetry that identifies the manager pointers. See [What's New in 0.2.2](#whats-new-in-022), [Current Limitations](#current-limitations), and [Contributing](#contributing).
+
+## What's New in 0.2.2
+
+- **Mount HP / stamina sync (opt-in)** - With `sync_mount_state = true`, `MountSync` installs a `SafetyHookMid` on the Orcax `MOUNT_PTR_CAPTURE` AOB to capture the local mount entity, polls HP/stamina from its stats component at 5Hz, and broadcasts a new `MOUNT_STATE` packet. Both peers read each other's mount state and the session panel displays a dedicated "Peer's Mount" HP + stamina bar when the remote player is mounted. Edge-triggered: mount and dismount events broadcast immediately without waiting for the next tick. Read-only on the remote side — no writes to the local mount entity, no attempt to spawn a mount for the companion. See the [Current Limitations](#current-limitations) table for the visual-sync caveat.
 
 ## What's New in 0.2.1
 
@@ -64,7 +68,7 @@ These features are **still not fully functional in-game** and need further resea
 | Cutscene sync | Receive-side stub + candidate pointer logging | Same probe as above. Trigger function still unknown |
 | World interaction sync | Receive-side stub + candidate pointer logging | Same probe as above |
 | Dragon mount HP | Dynamically resolved at first mount (experimental) | Auto-scan picks a plausible float. Value surfaces in the debug overlay - verify against in-game HP bar and report back if wrong |
-| Mount HP / stamina sync | Not yet wired | `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` AOBs from Orcax are now in `signatures::` but no hook installs them yet - blocked on co-op gameplay design (do we want shared mount HP at all?) |
+| Mount HP / stamina sync | State broadcast + overlay (opt-in via `sync_mount_state`) | `MOUNT_PTR_CAPTURE` mid-hook captures the local mount entity, `MountSync` polls HP/stamina at 5Hz and broadcasts `MOUNT_STATE`. Both peers display each other's mount status in the session panel. Visual sync (the companion entity still hovers at mount height on the remote side because no mount entity is spawned there) is a follow-up |
 | Per-action combat flags | Evaluator `+0x6A` flag captured (experimental) | Works only when evaluator hook is enabled and a combat action is active. Actor-base `0x130 / 0x131` stay deprecated |
 | Full camera struct | Zoom/FOV only | Camera mods use PAZ XML, not runtime memory. Only `+0xD8` is mapped |
 
@@ -155,6 +159,7 @@ Edit `cdcoop_config.json` in the game directory. The file is auto-created with d
     "sync_cutscenes": false,
     "sync_quest_progress": false,
     "sync_fast_travel": false,
+    "sync_mount_state": false,
     "skip_animation_remap": true,
 
     "player2_model_id": -1,
@@ -181,6 +186,7 @@ Edit `cdcoop_config.json` in the game directory. The file is auto-created with d
 | `sync_cutscenes` | `false` | Cutscene sync (receive-side still stubbed) |
 | `sync_quest_progress` | `false` | Quest sync (receive-side still stubbed) |
 | `sync_fast_travel` | `false` | Install the map-waypoint mid-hook. Host broadcasts captured waypoints; receive-side is log-only for now |
+| `sync_mount_state` | `false` | Install mount pointer capture. Both peers broadcast mount HP/stamina so the overlay can show the other player's mount status |
 | `skip_animation_remap` | `true` | Use passthrough mode for animation sync |
 | `player2_model_id` | `-1` | -1 = same as host character model |
 | `player2_use_companion_slot` | `true` | Hijack companion vs spawn new entity |
@@ -234,7 +240,8 @@ These are the remaining offsets/systems needed. **If you have access to any of t
 | 6 | **LOW** | World Objects | Confirm WorldSystem sibling for doors / chests / interactive world objects | Probe candidate stored but not yet mapped to a dispatch function |
 | 7 | **LOW** | Teleport apply function | The capture mid-hook at `+0xAB5594` is **landed** (0.2.1, gated on `sync_fast_travel`) and broadcasts `TELEPORT_TRIGGER`. What's still missing is the apply/transition function — the one that consumes `[r14+0xD8] / [r14+0xE0]` and triggers a real area transition. Once that's identified, the receive-side stub in `WorldSync::on_remote_teleport()` can call it directly | **Capture landed**, apply path unknown |
 | 8 | **LOW** | Combat Flag verification | The evaluator `+0x6A` flag from CDAnimCancel now writes when experimental hooks are enabled - confirm it actually gates co-op combat state the way we want | New hook needs field testing |
-| 9 | **LOW** | Mount HP / stamina dispatch | `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` AOBs from Orcax-1399 are now in `signatures::` but no detour reads / writes through them yet. Decision needed on whether co-op shares mount HP / stamina, then a small detour completes the loop | Signatures known, no hook |
+| 9 | **LOW** | Mount visual sync | **0.2.2 landed mount state sync** via the `MOUNT_PTR_CAPTURE` mid-hook + `MOUNT_STATE` packet + `MountSync`. What's still missing is visual parity: the companion entity appears to hover at mount height on the remote side because no mount entity is spawned for it. A full fix needs the mount-spawn function (unknown). An intermediate fix could piggyback on the companion's own native mount when it spawns during single-player |
+| 10 | **LOW** | `MOUNT_STAMINA_ACCESS` hook | The AOB is in `signatures::` but we're reading stamina through the standard StatEntry pattern instead. This hook would let us verify our stamina read path against the game's own or intercept stamina writes directly | Signature known, using alternate read path |
 
 #### Where to Look
 
@@ -280,6 +287,7 @@ These pages require manual human access (403 for automated tools). **If you can 
 | **Dragon Timer** | Verified | r13+0x160 float, AOB integrated |
 | **Mount HP (Horse)** | Verified | Dynamic capture via hook steps (pointer only resolves while mounted) |
 | **Fast-Travel Capture** | Implemented (opt-in) | `SafetyHookMid` at `+0xAB5594` reads `[r15+0x1C..0x28]`; host broadcasts `TELEPORT_TRIGGER` |
+| **Mount HP / Stamina Sync** | Implemented (opt-in) | `MOUNT_PTR_CAPTURE` mid-hook + `MountSync` polls at 5Hz, broadcasts `MOUNT_STATE`; overlay shows peer's bars |
 | **DX12 Present** | Implemented | Hook for ImGui overlay and frame tick |
 | **Steam P2P** | Implemented | ISteamNetworkingSockets with reliable/unreliable channels |
 | **40+ AOB Signatures** | Verified | Primary/fallback patterns from community mods |

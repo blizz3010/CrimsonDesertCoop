@@ -33,6 +33,7 @@ enum class PacketType : uint8_t {
     CUTSCENE_TRIGGER    = 0x32,
     LOOT_DROP           = 0x33,
     TELEPORT_TRIGGER    = 0x34,
+    MOUNT_STATE         = 0x35,
 
     // System
     CONFIG_SYNC         = 0xF0,
@@ -118,6 +119,21 @@ struct TeleportPacket {
     PacketHeader header;
     Vec3 destination;        // World-space waypoint (X, Y, Z)
     uint32_t waypoint_type;  // From [r15+0x00] — waypoint type id
+};
+
+// Mount state broadcast. Each peer sends their own mount HP/stamina so
+// the other player can display it in the overlay. `is_mounted=0` means
+// the peer just dismounted (remote side should clear the display).
+struct MountStatePacket {
+    PacketHeader header;
+    uint32_t mount_entity_id;  // low 32 bits of mount pointer (stable while mounted)
+    uint32_t mount_type_hash;  // hash of vtable RVA, for "same mount?" checks
+    float    health;
+    float    max_health;
+    float    stamina;
+    float    max_stamina;
+    uint8_t  is_mounted;       // 0 = dismount notification, 1 = active
+    uint8_t  _pad[3];
 };
 
 struct HandshakePacket {
