@@ -17,6 +17,7 @@ struct Config {
     float tether_distance = 150.0f;     // Max distance between players (meters)
     bool sync_cutscenes = false;       // Not yet implemented (awaiting quest/cutscene manager offsets)
     bool sync_quest_progress = false;  // Not yet implemented (awaiting quest manager offsets)
+    bool sync_fast_travel = false;     // Capture host fast-travel via mid-hook and notify peer (apply path is log-only for now)
     bool skip_animation_remap = true;    // passthrough mode - no cross-model remap
 
     // Player 2 appearance
@@ -50,7 +51,7 @@ struct Config {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Config,
         player_name, port, use_steam_networking,
         enemy_hp_multiplier, enemy_dmg_multiplier, tether_distance,
-        sync_cutscenes, sync_quest_progress, skip_animation_remap,
+        sync_cutscenes, sync_quest_progress, sync_fast_travel, skip_animation_remap,
         player2_model_id, player2_use_companion_slot,
         debug_overlay, log_packets, log_level,
         enable_experimental_hooks, dump_world_system_probe,

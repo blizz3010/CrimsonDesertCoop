@@ -27,7 +27,8 @@ This document explains how to find the memory offsets and function signatures ne
 | Full camera struct | **Missing** | Only zoom at +0xD8; rest is PAZ XML-controlled |
 | Dragon HP | **Candidate known** | `+0xD8` in dragon-mount struct (strong float candidate from field map); needs in-game read-back |
 | World object manager | **Missing** | MapLookup/MapInsert sigs exist but manager unknown |
-| Teleport / fast-travel | **Signatures known** | Waypoint-apply AOB at `+0xAB5594`, worldOffset global + entity velocity write — see below |
+| Teleport / fast-travel (capture) | **Hook landed** (0.2.1) | `SafetyHookMid` at `+0xAB5594`, opt-in via `sync_fast_travel`. Host broadcasts `TELEPORT_TRIGGER`; client apply path still log-only |
+| Mount pointer / stamina | **AOBs added** (0.2.1) | `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` constants from Orcax. No detour wired yet |
 
 ## Prerequisites
 
@@ -143,6 +144,9 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for all 40+ p
 | StatWrite | `STAT_WRITE_PRIMARY` / `STAT_WRITE_FALLBACK` | Health/stamina/spirit interception |
 | CameraZoomFOV | `CAMERA_ZOOM_FOV` / `CAMERA_ZOOM_FOV_NONWILD` | Camera struct capture (r12+0xD8) |
 | WorldSystem | `WORLD_SYSTEM_P1` / `P2` / `P3` | WorldSystem singleton resolution |
+| AnimationEvaluator (opt-in) | `ANIM_EVALUATOR` | rcx = evaluator this-pointer, gated on `enable_experimental_hooks` |
+| DragonHpProbe (opt-in) | `DRAGON_TIMER` | Marker capture + dynamic HP scan, gated on `enable_experimental_hooks` |
+| TeleportWaypoint (opt-in, mid-hook) | `TELEPORT_WAYPOINT` | r15 = source waypoint struct; gated on `sync_fast_travel` |
 
 ### Hooks Defined But Not Yet Installed (Need Signatures)
 
@@ -297,6 +301,17 @@ See `docs/RESEARCH_2026-04-18.md` for full derivation. Summary:
   packed as `{X, Z_height, Y, W}`.
 
 Integrated as `namespace Teleport` in `include/cdcoop/core/game_structures.h`.
+
+**0.2.1 update**: capture mid-hook is now installed (opt-in via `sync_fast_travel`). Host detour at `+0xAB5594` reads `[r15+0x00]` (waypoint type), `[r15+0x1C..0x28]` (X/Y/Z), and broadcasts `TELEPORT_TRIGGER`. Receive-side is intentionally log-only — the apply / area-transition function isn't identified yet. The 30Hz position broadcast pulls the companion entity along once the host arrives.
+
+### Mount pointer / stamina (Orcax-1399 player-status-modifier scanner, 2026-04-18 research pass)
+- **Mount pointer capture**: `48 8B C7 49 8B 7D 08 80 BF 94 00 00 00 00 0F 85 ?? ?? ?? ?? 48 8B 47 68 48 8B 48 20 48 83 C1 30 E8 ?? ?? ?? ?? 66 83 B8 E4 00 00 00 00` (offset 20). Function entry that walks the mount pointer chain ending at `+0x30`. Useful as an alternative to the static-base + chain resolution we currently use.
+- **Mount stamina ("AB00") access**: `0F B7 D7 49 8B CE E8 ?? ?? ?? ?? 48 8B F0 48 85 DB 74 ?? 33 C0 66 89 44 24 20 38 46 53` (offset 11). Hook site that reads/writes the mount stamina stat.
+
+Both added as `signatures::MOUNT_PTR_CAPTURE` and `signatures::MOUNT_STAMINA_ACCESS` in 0.2.1. No detour wired yet; pending decision on whether co-op should share mount HP / stamina.
+
+### Other Orcax-1399 AOBs (not yet integrated, listed for completeness)
+The Orcax scanner.cpp also publishes AOBs we don't currently need but are documented here in case a future mod wants them: dragon village-summon jump, dragon flying-restrict write, dragon roof-restrict test, affinity gain prepare / current write, abyss-gear durability delta, spirit signed-delta, item gain write. See [Orcax-1399/CrimsonDesert-player-status-modifier scanner.cpp](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier/blob/master/src/scanner.cpp).
 
 ### Dragon HP candidate (bbfox0703 CT, 2026-04-18 research pass)
 Reading the surrounding code at the dragon-timer injection site

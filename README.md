@@ -2,9 +2,16 @@
 
 A co-op multiplayer mod for [Crimson Desert](https://store.steampowered.com/app/3321460/Crimson_Desert/) that allows two players to play through the game together. The host player's game world is shared with a second player who joins via Steam P2P networking.
 
-> **Status: 0.2.0 In Development - Core Systems Functional, Research Hooks Opt-In**
+> **Status: 0.2.1 In Development - Core Systems Functional, Research Hooks Opt-In**
 >
-> Player position sync, companion hijacking, damage tracking, enemy HP sync, DX12 overlay, and Steam P2P networking all work with verified offsets. Animation sync defaults to passthrough but will switch to a CDAnimCancel-derived evaluator hook when `enable_experimental_hooks` is set. Dragon HP is resolved on the fly via a float-plausibility scan at first dragon mount. Quest sync, cutscene sync, and world interaction sync are **still not applied server-side** - set `dump_world_system_probe` to generate telemetry that identifies the manager pointers. See [What's New in 0.2.0](#whats-new-in-020), [Current Limitations](#current-limitations), and [Contributing](#contributing).
+> Player position sync, companion hijacking, damage tracking, enemy HP sync, DX12 overlay, and Steam P2P networking all work with verified offsets. Animation sync defaults to passthrough but will switch to a CDAnimCancel-derived evaluator hook when `enable_experimental_hooks` is set. Dragon HP is resolved on the fly via a float-plausibility scan at first dragon mount. The fast-travel mid-hook can now capture the host's waypoint targets when `sync_fast_travel` is enabled — the apply path on the receiver is still log-only pending field testing. Quest sync, cutscene sync, and world interaction sync remain **not applied server-side** - set `dump_world_system_probe` to generate telemetry that identifies the manager pointers. See [What's New in 0.2.1](#whats-new-in-021), [Current Limitations](#current-limitations), and [Contributing](#contributing).
+
+## What's New in 0.2.1
+
+- **Fast-travel mid-hook (opt-in)** - With `sync_fast_travel = true`, `HookManager` now installs a `SafetyHookMid` at `CrimsonDesert.exe+0xAB5594` (the map-waypoint apply site documented in [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md) #7). On the host, the detour reads `[r15+0x1C..0x28]` (waypoint X/Y/Z) and `[r15+0x00]` (waypoint type id), then broadcasts a new `TELEPORT_TRIGGER` packet. The client-side apply is intentionally log-only for this release because the apply function (the one that consumes the staged target and triggers the area transition) hasn't been identified — the existing 30Hz position broadcast already pulls the companion entity along once the host arrives.
+- **First mid-function hook in the project** - `HookManager::create_mid_hook()` and the `safetyhook::Context`-based detour signature are now available for any future register-state captures (quest manager dispatch, cutscene trigger, etc.).
+- **Two new community AOBs** in `signatures::` - `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` (from Orcax-1399 player-status-modifier scanner). Documented but not yet wired into a sync path; intended as the foundation for mount HP / stamina co-op sync.
+- **Build cleanup** - Fixed C2027 undefined `SteamNetConnectionStatusChangedCallback_t` regression that broke Windows builds with the Steamworks SDK ([#18](https://github.com/blizz3010/CrimsonDesertCoop/pull/18)). Fixed C4456 shadowed local in the position detour.
 
 ## What's New in 0.2.0
 
@@ -52,10 +59,12 @@ These features are **still not fully functional in-game** and need further resea
 | Feature | Status | What's Blocking It |
 |---------|--------|--------------------|
 | Animation sync (cross-model) | Passthrough only (0.1.x behavior) + evaluator write path (experimental) | Per-model animation IDs still need PAZ extraction for true remap. The evaluator hook captures the right struct but the ID namespace differs per character model |
+| Fast-travel sync | Capture-only mid-hook (opt-in via `sync_fast_travel`) | Hook reads the host's waypoint and broadcasts `TELEPORT_TRIGGER`; receive-side is log-only because the apply function isn't identified. Position broadcast usually pulls the companion along once the host arrives |
 | Quest sync | Receive-side stub + candidate pointer logging | Quest manager identity is now probed - set `dump_world_system_probe=true`, reproduce progress on host, and send `cdcoop_world_probe.log` to the issue tracker |
 | Cutscene sync | Receive-side stub + candidate pointer logging | Same probe as above. Trigger function still unknown |
 | World interaction sync | Receive-side stub + candidate pointer logging | Same probe as above |
 | Dragon mount HP | Dynamically resolved at first mount (experimental) | Auto-scan picks a plausible float. Value surfaces in the debug overlay - verify against in-game HP bar and report back if wrong |
+| Mount HP / stamina sync | Not yet wired | `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` AOBs from Orcax are now in `signatures::` but no hook installs them yet - blocked on co-op gameplay design (do we want shared mount HP at all?) |
 | Per-action combat flags | Evaluator `+0x6A` flag captured (experimental) | Works only when evaluator hook is enabled and a combat action is active. Actor-base `0x130 / 0x131` stay deprecated |
 | Full camera struct | Zoom/FOV only | Camera mods use PAZ XML, not runtime memory. Only `+0xD8` is mapped |
 
@@ -145,6 +154,7 @@ Edit `cdcoop_config.json` in the game directory. The file is auto-created with d
 
     "sync_cutscenes": false,
     "sync_quest_progress": false,
+    "sync_fast_travel": false,
     "skip_animation_remap": true,
 
     "player2_model_id": -1,
@@ -170,6 +180,7 @@ Edit `cdcoop_config.json` in the game directory. The file is auto-created with d
 | `tether_distance` | `150.0` | Max distance between players (meters) |
 | `sync_cutscenes` | `false` | Cutscene sync (receive-side still stubbed) |
 | `sync_quest_progress` | `false` | Quest sync (receive-side still stubbed) |
+| `sync_fast_travel` | `false` | Install the map-waypoint mid-hook. Host broadcasts captured waypoints; receive-side is log-only for now |
 | `skip_animation_remap` | `true` | Use passthrough mode for animation sync |
 | `player2_model_id` | `-1` | -1 = same as host character model |
 | `player2_use_companion_slot` | `true` | Hijack companion vs spawn new entity |
@@ -221,8 +232,9 @@ These are the remaining offsets/systems needed. **If you have access to any of t
 | 4 | **MEDIUM** | Camera State | Map camera struct beyond zoom (`+0xD8`) - position, rotation, target | Partial (zoom only) |
 | 5 | **MEDIUM** | Dragon HP verification | Read `[dragon_mount+0xD8]` in-game and confirm it tracks the HP bar. Strong candidate from the dragon-mount field map at `CrimsonDesert.exe+0x339D8CB` (see [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md)). Integrated as `Mount::DRAGON_HP_PREFERRED_OFFSET` | **Candidate known**, needs field read-back |
 | 6 | **LOW** | World Objects | Confirm WorldSystem sibling for doors / chests / interactive world objects | Probe candidate stored but not yet mapped to a dispatch function |
-| 7 | **LOW** | Teleport System | Hook fast travel at `CrimsonDesert.exe+0xAB5594` (`r14` = entity, `r15` = waypoint source). Snapshot `[r15+0x1C..0x28]` on host, broadcast, replay on peer. AOB + full struct in [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md) | **Signatures known**, hook not yet installed |
+| 7 | **LOW** | Teleport apply function | The capture mid-hook at `+0xAB5594` is **landed** (0.2.1, gated on `sync_fast_travel`) and broadcasts `TELEPORT_TRIGGER`. What's still missing is the apply/transition function — the one that consumes `[r14+0xD8] / [r14+0xE0]` and triggers a real area transition. Once that's identified, the receive-side stub in `WorldSync::on_remote_teleport()` can call it directly | **Capture landed**, apply path unknown |
 | 8 | **LOW** | Combat Flag verification | The evaluator `+0x6A` flag from CDAnimCancel now writes when experimental hooks are enabled - confirm it actually gates co-op combat state the way we want | New hook needs field testing |
+| 9 | **LOW** | Mount HP / stamina dispatch | `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` AOBs from Orcax-1399 are now in `signatures::` but no detour reads / writes through them yet. Decision needed on whether co-op shares mount HP / stamina, then a small detour completes the loop | Signatures known, no hook |
 
 #### Where to Look
 
@@ -267,6 +279,7 @@ These pages require manual human access (403 for automated tools). **If you can 
 | **Durability** | Verified | Write, delta, and abyss AOBs with primary/fallback (from Orcax) |
 | **Dragon Timer** | Verified | r13+0x160 float, AOB integrated |
 | **Mount HP (Horse)** | Verified | Dynamic capture via hook steps (pointer only resolves while mounted) |
+| **Fast-Travel Capture** | Implemented (opt-in) | `SafetyHookMid` at `+0xAB5594` reads `[r15+0x1C..0x28]`; host broadcasts `TELEPORT_TRIGGER` |
 | **DX12 Present** | Implemented | Hook for ImGui overlay and frame tick |
 | **Steam P2P** | Implemented | ISteamNetworkingSockets with reliable/unreliable channels |
 | **40+ AOB Signatures** | Verified | Primary/fallback patterns from community mods |
