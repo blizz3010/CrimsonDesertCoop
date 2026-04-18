@@ -9,7 +9,6 @@
 #include <steam/steam_api.h>
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
-#include <steam/steamnetworkingsockets.h>
 
 namespace cdcoop {
 
