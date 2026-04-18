@@ -152,8 +152,38 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for all 40+ p
 
 | Hook | Blocker |
 |------|---------|
-| `player_animation_hook` | Animation state offsets (0x120/0x124) are estimated, no animation write AOB found |
-| `companion_spawn_hook` | No companion spawn function signature found |
+| `player_animation_hook` | Animation state offsets (0x120/0x124) are estimated, no animation write AOB found. Superseded in practice by the experimental evaluator hook (`enable_experimental_hooks`) |
+| `companion_spawn_hook` | No companion spawn function signature found. CompanionHijack retries lazily on `activate()` so this isn't a functional gap |
+
+### Documented Signatures Available But Not Yet Wired (0.2.3 audit)
+
+These AOB constants live in `signatures::` and resolve correctly, but no
+detour or sync system currently calls them. They are kept as scaffolding
+because they may unlock specific co-op features when needed:
+
+| Signature | What it gives you | Possible co-op use |
+|-----------|-------------------|--------------------|
+| `MAP_LOOKUP_P1` / `MAP_INSERT_P1` | Generic map dictionary primitives (from EquipHide) | Could be the foundation for a generic key-value sync (e.g. world flags, quest state) once the manager identity is known |
+| `PART_INOUT_P1` / `PART_INOUT_P2` | Companion / equipment visibility transitions | Auto-trigger `CompanionHijack::activate()` when a companion becomes visible, removing the manual `spawn_remote_player()` step |
+| `HP_CAPTURE_STEP1` / `HP_CAPTURE_STEP2` | Alternative path to player + horse HP base capture (from bbfox CT) | Cross-verification of our existing player HP read; could also resolve mount HP without depending on the Orcax `MOUNT_PTR_CAPTURE` |
+| `DURABILITY_WRITE_PRIMARY` / `_FALLBACK` | Gear durability writes (from Orcax) | Co-op gear durability sync if both players want shared damage/repair |
+| `REPUTATION_SET_MIN` / `REPUTATION_NO_DEC` | Reputation gain setters (from bbfox CT) | Single-player progression — not co-op-relevant |
+| `CONTRIBUTION_GAIN` / `_MAP`, `TRUST_GIFT` / `_SHOP`, `INVENTORY_SLOT_READ` | Single-player progression hooks | Not co-op-relevant |
+| `INF_ARROW`, `ITEM_REMOVE_NO_DEC`, `FAST_ENEMY_KILL`, `FAST_FRIENDSHIP` | Single-player cheats | Not co-op-relevant |
+| `BASE_SUPPLY`, `SELECTED_ITEM`, `ARCHERY_CONTEST`, `CONTEST_SCORE`, `ITEM_HIGHLIGHT` | Misc single-player UX | Not co-op-relevant |
+
+### Documented Offsets Available But Not Yet Used
+
+Same logic — these `offsets::*` constants are defined but no .cpp file
+references them. Mostly single-player progression that doesn't need
+syncing across peers:
+
+- `ItemEntry::*` (5 fields) — inventory item layout
+- `BaseSupply::*` (6 fields) — base supply economy
+- `Contribution::*`, `Trust::VALUE`, `Reputation::*`, `ResistanceAttrs::*` — progression
+- `Companion::MODEL_ID`, `Companion::IS_ACTIVE` — only `AI_CONTROLLER` and `ANIM_STATE` are read by `CompanionHijack`
+- `AnimationEvaluator::COMBAT_FLAG` — declared but the evaluator hook only reads `STATE` / `BLEND_WEIGHT`
+- `Enemy::AGGRO_TARGET` — only `STATE` is synced via `EnemySync`
 
 ## Step 5: Extract Signatures
 
@@ -260,8 +290,17 @@ See `include/cdcoop/core/game_structures.h` namespace `signatures` for the full 
 
 ## New Leads from Community Research (April 2026)
 
-### CDAnimCancel / Guard Cancel (Animation System RE)
-**GitHub**: https://github.com/faisalkindi/CDAnimCancel
+### CDAnimCancel / CDGuardCancel (Animation System RE)
+**Original**: https://github.com/faisalkindi/CDAnimCancel — now 404. The
+findings below were captured before the original repo went down.
+
+**Successor (April 2026, same author)**: https://github.com/faisalkindi/CDGuardCancel
+- Re-publishes `tools/extract_paac.py` and `patch_transitions.py`
+- Documents the 3-layer guard block system (branchset, timeline, guard sub-blocks)
+- 622KB bytecode section controls attack sub-state transitions
+- Confirms the same evaluator function entry below
+
+Captured findings (still valid against current builds):
 - **Critical finding**: The animation system uses **.paac action chart files** (PA Action Chart binary), NOT simple actor struct fields. Memory scanning for animation state offsets was "unsuccessful -- state hidden behind unknown pointers"
 - **Evaluator function**: `CrimsonDesert.exe+2712090` - gate that returns 0/1 for animation transitions. AOB: `0F 28 CE 48 89 4C 24 20 48 8B CB E8`
 - **Guard activation**: Entry at `+2712330`, AOB: `48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 41 54 41 55 41 56 41 57 48 83 EC 60`

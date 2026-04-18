@@ -64,6 +64,10 @@ void EnemySync::update(float delta_time) {
         uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
         if (!is_valid_ptr(entity)) continue;
         if (entity == player || entity == companion) continue;
+        // Skip ChildActor instances (companions, summons). When the
+        // vtable hasn't been resolved yet, is_child_actor returns false
+        // and we fall back to the pointer-equality check above.
+        if (is_child_actor(entity)) continue;
 
         // Read enemy position via the verified pointer chain
         Vec3 pos = {0, 0, 0};
@@ -176,6 +180,10 @@ void EnemySync::apply_coop_scaling() {
         uintptr_t entity = read_mem<uintptr_t>(rt.actor_manager_ptr, slot_offset);
         if (!is_valid_ptr(entity)) continue;
         if (entity == player || entity == companion) continue;
+        // Skip ChildActor instances (companions, summons). When the
+        // vtable hasn't been resolved yet, is_child_actor returns false
+        // and we fall back to the pointer-equality check above.
+        if (is_child_actor(entity)) continue;
 
         uint32_t entity_id = static_cast<uint32_t>(entity & 0xFFFFFFFF);
 
