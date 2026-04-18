@@ -4,8 +4,11 @@
 
 #if CDCOOP_STEAM
 
-// Forward declare Steam types to avoid requiring Steamworks headers everywhere
+// Forward declare Steam types to avoid requiring Steamworks headers everywhere.
+// These must live in the global namespace so the friend declaration below
+// refers to the SDK type rather than an unintended cdcoop:: forward decl.
 struct SteamNetworkingIdentity;
+struct SteamNetConnectionStatusChangedCallback_t;
 
 namespace cdcoop {
 
@@ -33,7 +36,7 @@ public:
     void on_lobby_join(uint64_t steam_id);
 
     // Allow the connection status callback to access impl_
-    friend void on_connection_status_changed(struct SteamNetConnectionStatusChangedCallback_t*);
+    friend void on_connection_status_changed(::SteamNetConnectionStatusChangedCallback_t*);
 
 private:
     struct Impl;
