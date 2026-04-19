@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <thread>
+#include <atomic>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 
@@ -20,6 +21,55 @@
 #include <cdcoop/ui/overlay.h>
 
 namespace {
+
+// Hotkey input thread. Runs independently of the DX12 Present hook so
+// F7 / F8 keep working even when the overlay fails to attach (e.g. when
+// another mod hooked DXGI first — Optiscaler, ReShade, XeSS wrappers,
+// or a driver-level overlay on non-NVIDIA GPUs). Without this fallback
+// the hotkeys are a no-op whenever the rendering hook chain breaks.
+std::atomic<bool> g_input_thread_exit{false};
+std::thread g_input_thread;
+
+void input_poll_loop() {
+    const auto& cfg = cdcoop::get_config();
+    const int host_key   = cfg.open_session_key;
+    const int toggle_key = cfg.toggle_overlay_key;
+
+    spdlog::info("Input thread started (host={:#x}, overlay={:#x}). "
+                 "Hotkeys will work regardless of overlay state.",
+                 host_key, toggle_key);
+
+    bool host_prev = false;
+    bool toggle_prev = false;
+
+    while (!g_input_thread_exit.load(std::memory_order_relaxed)) {
+        // GetAsyncKeyState high bit = currently held. Edge-detect
+        // transition-to-pressed so holding the key doesn't re-fire.
+        bool host_now = (GetAsyncKeyState(host_key) & 0x8000) != 0;
+        if (host_now && !host_prev) {
+            auto& session = cdcoop::Session::instance();
+            if (session.state() == cdcoop::SessionState::DISCONNECTED) {
+                spdlog::info("Host hotkey: starting session");
+                session.host_session();
+            } else {
+                spdlog::info("Host hotkey: session already active (state {})",
+                             static_cast<int>(session.state()));
+            }
+        }
+        host_prev = host_now;
+
+        bool toggle_now = (GetAsyncKeyState(toggle_key) & 0x8000) != 0;
+        if (toggle_now && !toggle_prev) {
+            cdcoop::Overlay::instance().toggle_visible();
+            spdlog::debug("Overlay toggle hotkey fired");
+        }
+        toggle_prev = toggle_now;
+
+        Sleep(16); // ~60Hz polling — imperceptible input latency, trivial CPU
+    }
+
+    spdlog::info("Input thread exited");
+}
 
 void setup_logging() {
     auto& cfg = cdcoop::get_config();
@@ -84,12 +134,24 @@ void mod_main() {
             spdlog::warn("Companion hijack init failed - will retry on activate()");
         }
 
-        // Step 5: Initialize overlay UI
-        if (!cdcoop::Overlay::instance().initialize()) {
-            spdlog::warn("Overlay initialization failed - UI will be unavailable");
+        // Step 5: Initialize overlay UI. This hooks DXGI Present and
+        // can fail when another mod has already hooked it (Optiscaler,
+        // ReShade, driver overlays). Non-fatal — the hotkey thread
+        // below makes sure F7/F8 still work in that case.
+        const bool overlay_ok = cdcoop::Overlay::instance().initialize();
+        if (!overlay_ok) {
+            spdlog::warn("Overlay initialization failed — the ImGui UI will not render. "
+                         "F7/F8 still work via the input thread; share Steam IDs manually.");
         }
 
-        spdlog::info("CrimsonDesertCoop fully initialized! Press F8 for overlay, F7 to host/join.");
+        // Step 6: Start the fallback input thread. Must run even when
+        // the overlay is fine, because it's also the source of truth
+        // for hotkey handling now (de-duplicated with the Present hook).
+        g_input_thread = std::thread(input_poll_loop);
+
+        spdlog::info("CrimsonDesertCoop fully initialized!");
+        spdlog::info("  Overlay: {}", overlay_ok ? "ON (F8 toggles)" : "OFF (Present hook failed)");
+        spdlog::info("  F7 = host session, F8 = toggle overlay");
         spdlog::info("Waiting for session...");
 
     } catch (const std::exception& e) {
@@ -106,6 +168,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
         std::thread(mod_main).detach();
     } else if (reason == DLL_PROCESS_DETACH) {
         spdlog::info("CrimsonDesertCoop shutting down...");
+
+        // Stop the hotkey thread before anything else so it can't observe
+        // half-torn-down singletons during its next poll.
+        g_input_thread_exit.store(true, std::memory_order_relaxed);
+        if (g_input_thread.joinable()) {
+            g_input_thread.join();
+        }
+
         cdcoop::Overlay::instance().shutdown();
         cdcoop::CompanionHijack::instance().shutdown();
         cdcoop::MountSync::instance().shutdown();
