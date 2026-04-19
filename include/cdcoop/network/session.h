@@ -109,6 +109,13 @@ private:
     std::unordered_map<PacketType, PacketCallback> handlers_;
     std::mutex handler_mutex_;
 
+    // Serialises host/join/leave. The state_ atomic alone isn't enough
+    // because these do check-then-create on transport_ — two concurrent
+    // transitions (F7 hotkey + Steam invite arriving at the same moment)
+    // would both pass the DISCONNECTED check and race on transport_
+    // reset, which is UB. Lock scope is the whole transition.
+    std::mutex transition_mutex_;
+
     uint32_t sequence_ = 0;
     float heartbeat_timer_ = 0.0f;
     float ping_ms_ = 0.0f;
