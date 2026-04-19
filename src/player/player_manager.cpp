@@ -15,9 +15,16 @@ bool PlayerManager::initialize() {
     find_local_player();
 
     if (local_player_ == 0) {
-        spdlog::error("PlayerManager: could not find local player");
-        spdlog::error("Make sure you are in-game (not in a menu) before the mod initializes");
-        return false;
+        // Non-fatal: this happens when the mod initializes while the user
+        // is still on the main menu / character select. The update() tick
+        // re-runs find_local_player() each frame, so the pointer will
+        // resolve as soon as the player loads into the world. Returning
+        // false here used to abort the whole mod (sync systems, overlay,
+        // input thread all skipped) — now we let init proceed so F7 works
+        // the moment the world finishes loading.
+        spdlog::warn("PlayerManager: local player not found yet — will retry on each tick");
+        spdlog::warn("This is normal if the mod loaded while you were still in the menu");
+        return true;
     }
 
     spdlog::info("PlayerManager: local player at 0x{:X}", local_player_);

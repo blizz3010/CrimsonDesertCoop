@@ -51,12 +51,18 @@ void PlayerSync::update(float delta_time) {
     auto& session = Session::instance();
     if (!session.is_active()) return;
 
+    auto& pm = PlayerManager::instance();
+    // Don't broadcast garbage while we're waiting for the player pointer
+    // to resolve (mod can init on the main menu now — see PlayerManager::
+    // initialize). Without this guard the peer would see us teleporting
+    // to {0,0,0} every frame until the world finishes loading.
+    if (pm.local_player() == 0) return;
+
     // Send our position at fixed rate
     send_timer_ += delta_time;
     if (send_timer_ >= POSITION_SEND_RATE) {
         send_timer_ = 0.0f;
 
-        auto& pm = PlayerManager::instance();
         Vec3 pos = pm.local_position();
         Quat rot = pm.local_rotation();
         on_local_position_changed(pos, rot, {0, 0, 0}, 0);
@@ -67,7 +73,6 @@ void PlayerSync::update(float delta_time) {
     if (full_state_timer_ >= FULL_STATE_RATE) {
         full_state_timer_ = 0.0f;
 
-        auto& pm = PlayerManager::instance();
         auto& rt = get_runtime_offsets();
         PlayerFullStatePacket pkt{};
         pkt.header.type = PacketType::PLAYER_FULL_STATE;
@@ -100,7 +105,6 @@ void PlayerSync::update(float delta_time) {
     }
 
     // Tether check
-    auto& pm = PlayerManager::instance();
     Vec3 local_pos = pm.local_position();
     Vec3 diff = interpolated_state_.position - local_pos;
     float dist_sq = diff.length_sq();
