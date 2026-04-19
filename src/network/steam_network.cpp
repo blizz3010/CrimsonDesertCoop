@@ -26,7 +26,7 @@ struct SteamNetworkTransport::Impl {
 
 // Connection status change callback - uses g_active_transport to update state
 static void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
-    spdlog::info("Steam: connection status changed to {}", info->m_info.m_eState);
+    spdlog::info("Steam: connection status changed to {}", static_cast<int>(info->m_info.m_eState));
 
     if (!g_active_transport || !g_active_transport->impl_) return;
     auto* impl = g_active_transport->impl_.get();
@@ -62,7 +62,7 @@ static void on_connection_status_changed(SteamNetConnectionStatusChangedCallback
 
         case k_ESteamNetworkingConnectionState_ClosedByPeer:
         case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
-            spdlog::warn("Steam: connection lost (reason: {})", info->m_info.m_eEndReason);
+            spdlog::warn("Steam: connection lost (reason: {})", static_cast<int>(info->m_info.m_eEndReason));
             if (info->m_hConn == impl->connection) {
                 impl->sockets->CloseConnection(info->m_hConn, 0, nullptr, false);
                 impl->connection = k_HSteamNetConnection_Invalid;
