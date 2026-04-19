@@ -9,6 +9,22 @@
 
 namespace cdcoop {
 
+namespace {
+// A Vec3/Quat from a remote peer can arrive NaN/inf if the packet was
+// corrupted, or if a peer with mismatched code sent garbage. Once a
+// non-finite value lands in interpolated_state_, the lerp in
+// interpolate_remote_state poisons every subsequent update and the
+// NaN eventually gets written into the companion entity's position
+// struct in game memory — which the engine handles very badly.
+bool is_finite_vec3(const Vec3& v) {
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+bool is_finite_quat(const Quat& q) {
+    return std::isfinite(q.x) && std::isfinite(q.y) &&
+           std::isfinite(q.z) && std::isfinite(q.w);
+}
+} // namespace
+
 PlayerSync& PlayerSync::instance() {
     static PlayerSync inst;
     return inst;
@@ -167,6 +183,13 @@ void PlayerSync::on_remote_position(const uint8_t* data, size_t size) {
     if (size < sizeof(PlayerPositionPacket)) return;
     auto* pkt = reinterpret_cast<const PlayerPositionPacket*>(data);
 
+    // Drop anything non-finite before it reaches the interpolator.
+    if (!is_finite_vec3(pkt->position) || !is_finite_quat(pkt->rotation) ||
+        !is_finite_vec3(pkt->velocity)) {
+        spdlog::warn("Dropping non-finite remote position packet");
+        return;
+    }
+
     // Add to interpolation buffer
     auto& slot = state_buffer_[state_buffer_head_];
     slot.position = pkt->position;
@@ -208,6 +231,16 @@ void PlayerSync::on_remote_combat(const uint8_t* data, size_t size) {
 void PlayerSync::on_remote_full_state(const uint8_t* data, size_t size) {
     if (size < sizeof(PlayerFullStatePacket)) return;
     auto* pkt = reinterpret_cast<const PlayerFullStatePacket*>(data);
+
+    // Same finite-check as on_remote_position; full-state packets write
+    // into the same interpolation buffer so the same NaN-poisoning
+    // hazard exists here.
+    if (!is_finite_vec3(pkt->position) || !is_finite_quat(pkt->rotation) ||
+        !is_finite_vec3(pkt->velocity) ||
+        !std::isfinite(pkt->health) || !std::isfinite(pkt->max_health)) {
+        spdlog::warn("Dropping non-finite remote full-state packet");
+        return;
+    }
 
     // Full state overwrites interpolation buffer
     auto& slot = state_buffer_[state_buffer_head_];
