@@ -18,7 +18,8 @@ Session& Session::instance() {
 
 bool Session::host_session() {
     if (state_ != SessionState::DISCONNECTED) {
-        spdlog::warn("Cannot host: already in state {}", static_cast<int>(state_));
+        spdlog::warn("Cannot host: already in state {}",
+                     static_cast<int>(state_.load()));
         return false;
     }
 
@@ -54,7 +55,8 @@ bool Session::host_session() {
 
 bool Session::join_session(const std::string& target) {
     if (state_ != SessionState::DISCONNECTED) {
-        spdlog::warn("Cannot join: already in state {}", static_cast<int>(state_));
+        spdlog::warn("Cannot join: already in state {}",
+                     static_cast<int>(state_.load()));
         return false;
     }
 

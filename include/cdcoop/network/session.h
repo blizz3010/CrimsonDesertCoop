@@ -5,7 +5,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <queue>
+#include <unordered_map>
 #include <cdcoop/network/packet.h>
 
 namespace cdcoop {
@@ -72,10 +74,10 @@ public:
     // Must be called every game tick to process network messages
     void update(float delta_time);
 
-    SessionState state() const { return state_; }
-    SessionRole role() const { return role_; }
-    bool is_active() const { return state_ == SessionState::CONNECTED; }
-    bool is_host() const { return role_ == SessionRole::HOST; }
+    SessionState state() const { return state_.load(std::memory_order_acquire); }
+    SessionRole role() const { return role_.load(std::memory_order_acquire); }
+    bool is_active() const { return state() == SessionState::CONNECTED; }
+    bool is_host() const { return role() == SessionRole::HOST; }
 
     // Register handlers for specific packet types
     void register_handler(PacketType type, PacketCallback handler);
@@ -97,8 +99,12 @@ private:
     void send_heartbeat();
 
     std::unique_ptr<INetworkTransport> transport_;
-    SessionState state_ = SessionState::DISCONNECTED;
-    SessionRole role_ = SessionRole::NONE;
+    // Atomic because the render thread reads state/role via the public
+    // accessors while the packet and input threads write on session
+    // lifecycle transitions. Seq-cst store is fine — these switch a
+    // handful of times per session.
+    std::atomic<SessionState> state_{SessionState::DISCONNECTED};
+    std::atomic<SessionRole>  role_{SessionRole::NONE};
 
     std::unordered_map<PacketType, PacketCallback> handlers_;
     std::mutex handler_mutex_;
