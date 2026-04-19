@@ -10,6 +10,7 @@
 
 #include <cdcoop/core/hooks.h>
 #include <cdcoop/core/config.h>
+#include <cdcoop/core/memory.h>
 #include <cdcoop/network/session.h>
 #include <cdcoop/network/steam_network.h>
 #include <cdcoop/sync/player_sync.h>
@@ -74,7 +75,12 @@ void input_poll_loop() {
 
 void setup_logging() {
     auto& cfg = cdcoop::get_config();
-    auto logger = spdlog::basic_logger_mt("cdcoop", "cdcoop.log", true);
+    // Anchor the log at the DLL's own directory. The old relative path
+    // resolved against the game process's CWD, which differs between
+    // Steam launches, Proton, and various ASI loaders — users routinely
+    // couldn't find cdcoop.log because it landed somewhere unexpected.
+    std::string log_path = cdcoop::self_module_dir() + "cdcoop.log";
+    auto logger = spdlog::basic_logger_mt("cdcoop", log_path, true);
     spdlog::set_default_logger(logger);
 
     switch (cfg.log_level) {
@@ -171,9 +177,42 @@ void mod_main() {
 
 } // anonymous namespace
 
+// Drops a small marker file next to the DLL the instant DllMain fires.
+// If this file is missing, the ASI loader never touched us — which is a
+// distinct failure mode from "loaded but crashed before setup_logging()".
+// Kept to plain WinAPI so it works even if the CRT init is incomplete.
+static void drop_load_marker(HMODULE hModule) {
+    wchar_t wpath[MAX_PATH];
+    DWORD len = GetModuleFileNameW(hModule, wpath, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) return;
+    std::wstring marker(wpath, len);
+    auto slash = marker.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return;
+    marker.resize(slash + 1);
+    marker += L"cdcoop_loaded.txt";
+
+    HANDLE h = CreateFileW(marker.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                           nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char buf[256];
+    int n = wsprintfA(buf,
+        "CrimsonDesertCoop ASI loaded.\r\n"
+        "Local time: %04d-%02d-%02d %02d:%02d:%02d\r\n"
+        "PID: %lu\r\n",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+        GetCurrentProcessId());
+    DWORD written = 0;
+    if (n > 0) WriteFile(h, buf, static_cast<DWORD>(n), &written, nullptr);
+    CloseHandle(h);
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
+        drop_load_marker(hModule);
         // Launch initialization on a separate thread to avoid blocking DllMain
         std::thread(mod_main).detach();
     } else if (reason == DLL_PROCESS_DETACH) {

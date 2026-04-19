@@ -1,8 +1,24 @@
 #include <cdcoop/core/memory.h>
 #include <spdlog/spdlog.h>
 #include <Windows.h>
+#include <filesystem>
+
+// MSVC linker-defined symbol pointing at our own DLL's image base. Stable
+// across every TU in this module, so we can recover the DLL's on-disk path
+// without having to thread HMODULE through from DllMain.
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace cdcoop {
+
+std::string self_module_dir() {
+    wchar_t wpath[MAX_PATH];
+    DWORD len = GetModuleFileNameW(reinterpret_cast<HMODULE>(&__ImageBase),
+                                   wpath, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) return {};
+    std::filesystem::path p(std::wstring(wpath, len));
+    return (p.parent_path() / "").string();
+}
+
 
 MemoryScanner::Pattern MemoryScanner::parse_pattern(const std::string& sig_str) {
     Pattern pat;
