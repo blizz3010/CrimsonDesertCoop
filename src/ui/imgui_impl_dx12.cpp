@@ -332,7 +332,27 @@ bool install_present_hook() {
     D3D12_COMMAND_QUEUE_DESC qd = {};
     qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     ID3D12CommandQueue* tmp_queue = nullptr;
-    tmp_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&tmp_queue));
+    HRESULT hr = tmp_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&tmp_queue));
+    if (FAILED(hr) || !tmp_queue) {
+        // Reported on some Intel Arc drivers when the WARP fallback is in
+        // a weird state. We were previously calling tmp_queue->Release()
+        // on the failure path of the swap-chain create below, which ate
+        // a null deref if we'd reached that path with tmp_queue still
+        // null — crashing the game during mod init.
+        tmp_device->Release();
+        factory->Release();
+        spdlog::error("DX12 Hook: Failed to create temporary command queue (0x{:X})",
+                      static_cast<uint32_t>(hr));
+        return false;
+    }
+
+    HWND output_window = GetForegroundWindow();
+    if (!output_window) {
+        // Some launchers steal foreground briefly during init. Fall back
+        // to the desktop window so CreateSwapChain has a valid HWND;
+        // we never present to it, only need it to derive the vtable.
+        output_window = GetDesktopWindow();
+    }
 
     DXGI_SWAP_CHAIN_DESC sd = {};
     sd.BufferCount = 2;
@@ -340,13 +360,13 @@ bool install_present_hook() {
     sd.BufferDesc.Height = 100;
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.OutputWindow = GetForegroundWindow();
+    sd.OutputWindow = output_window;
     sd.SampleDesc.Count = 1;
     sd.Windowed = TRUE;
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     IDXGISwapChain* tmp_swap = nullptr;
-    HRESULT hr = factory->CreateSwapChain(tmp_queue, &sd, &tmp_swap);
+    hr = factory->CreateSwapChain(tmp_queue, &sd, &tmp_swap);
     if (FAILED(hr)) {
         tmp_queue->Release();
         tmp_device->Release();
