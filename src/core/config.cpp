@@ -1,11 +1,15 @@
 #include <cdcoop/core/config.h>
+#include <cdcoop/core/memory.h>
 #include <fstream>
 #include <spdlog/spdlog.h>
 
 namespace cdcoop {
 
 static Config g_config;
-static const std::string CONFIG_PATH = "cdcoop_config.json";
+// Resolved lazily in reload_config() so we can anchor at the DLL's own
+// directory rather than the game process's CWD (the same bug that made
+// cdcoop.log disappear into unrelated folders). Empty until first load.
+static std::string g_resolved_config_path;
 
 Config Config::load(const std::string& path) {
     Config cfg;
@@ -42,7 +46,10 @@ Config& get_config() {
 }
 
 void reload_config() {
-    g_config = Config::load(CONFIG_PATH);
+    if (g_resolved_config_path.empty()) {
+        g_resolved_config_path = self_module_dir() + "cdcoop_config.json";
+    }
+    g_config = Config::load(g_resolved_config_path);
 }
 
 } // namespace cdcoop

@@ -15,12 +15,18 @@
 
 #include <memory>
 #include <string>
+#include <atomic>
 
 namespace cdcoop {
 
 // Static pointer to the active transport so the free callback can access it.
 // Only one SteamNetworkTransport instance should be active at a time.
-static SteamNetworkTransport* g_active_transport = nullptr;
+// Atomic because Steam dispatches callbacks on the thread pumping
+// SteamAPI_RunCallbacks (the game's main thread), while the ctor/dtor
+// here run on the init/session thread that spun up the transport. A
+// plain pointer read racing with dtor = null set was a latent use-
+// after-free.
+static std::atomic<SteamNetworkTransport*> g_active_transport{nullptr};
 
 // Max lobby members for co-op. Host + 1 joiner = 2. Keep it small so the
 // invite dialog doesn't look like "start a party game" — this is 2-player.
@@ -153,8 +159,12 @@ void SteamNetworkTransport::Impl::on_lobby_entered(LobbyEnter_t* info) {
 void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
     spdlog::info("Steam: connection status changed to {}", static_cast<int>(info->m_info.m_eState));
 
-    if (!g_active_transport || !g_active_transport->impl_) return;
-    auto* impl = g_active_transport->impl_.get();
+    // Snapshot the transport pointer once so a concurrent dtor that
+    // clears g_active_transport mid-callback can't null-deref us partway
+    // through the switch below.
+    SteamNetworkTransport* transport = g_active_transport.load(std::memory_order_acquire);
+    if (!transport || !transport->impl_) return;
+    auto* impl = transport->impl_.get();
 
     switch (info->m_info.m_eState) {
         case k_ESteamNetworkingConnectionState_Connecting:
@@ -203,7 +213,7 @@ void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* inf
 SteamNetworkTransport::SteamNetworkTransport() : impl_(std::make_unique<Impl>()) {
     spdlog::info("Steam network transport created");
 
-    g_active_transport = this;
+    g_active_transport.store(this, std::memory_order_release);
 
     // Initialize Steam networking interface
     impl_->sockets = SteamNetworkingSockets();
@@ -214,10 +224,12 @@ SteamNetworkTransport::SteamNetworkTransport() : impl_(std::make_unique<Impl>())
 }
 
 SteamNetworkTransport::~SteamNetworkTransport() {
+    // Publish the null first so any Steam callback arriving mid-teardown
+    // bails out in on_connection_status_changed before we destroy impl_.
+    SteamNetworkTransport* expected = this;
+    g_active_transport.compare_exchange_strong(expected, nullptr,
+                                               std::memory_order_acq_rel);
     disconnect();
-    if (g_active_transport == this) {
-        g_active_transport = nullptr;
-    }
 }
 
 bool SteamNetworkTransport::host(uint16_t port) {
