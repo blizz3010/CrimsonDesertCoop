@@ -17,6 +17,7 @@ Session& Session::instance() {
 }
 
 bool Session::host_session() {
+    std::lock_guard lock(transition_mutex_);
     if (state_ != SessionState::DISCONNECTED) {
         spdlog::warn("Cannot host: already in state {}",
                      static_cast<int>(state_.load()));
@@ -54,6 +55,7 @@ bool Session::host_session() {
 }
 
 bool Session::join_session(const std::string& target) {
+    std::lock_guard lock(transition_mutex_);
     if (state_ != SessionState::DISCONNECTED) {
         spdlog::warn("Cannot join: already in state {}",
                      static_cast<int>(state_.load()));
@@ -99,6 +101,7 @@ bool Session::join_session(const std::string& target) {
 }
 
 void Session::leave_session() {
+    std::lock_guard lock(transition_mutex_);
     if (state_ == SessionState::DISCONNECTED) return;
 
     spdlog::info("Leaving session...");
