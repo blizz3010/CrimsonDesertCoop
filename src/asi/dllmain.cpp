@@ -22,7 +22,44 @@
 #include <cdcoop/sync/animation_sync.h>
 #include <cdcoop/ui/overlay.h>
 
+// MSVC linker-provided symbol: address = HMODULE of the containing DLL.
+// Lets marker helpers find the DLL's path without threading hModule
+// through from DllMain.
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
 namespace {
+
+// Appends a timestamped line to cdcoop_loaded.txt next to the DLL. Plain
+// WinAPI — never touches spdlog — so it works even if the logger failed
+// to open cdcoop.log (read-only install dir, antivirus, etc.). The marker
+// file becomes a low-fidelity init journal that pinpoints how far we got
+// when users report "the mod isn't working". Wide-path to survive
+// non-ASCII install dirs (matches drop_load_marker).
+void append_marker(const char* msg) {
+    wchar_t wpath[MAX_PATH];
+    DWORD len = GetModuleFileNameW(reinterpret_cast<HMODULE>(&__ImageBase),
+                                   wpath, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) return;
+    std::wstring path(wpath, len);
+    auto slash = path.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return;
+    path.resize(slash + 1);
+    path += L"cdcoop_loaded.txt";
+
+    HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                           nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, nullptr, FILE_END);
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char buf[512];
+    int n = wsprintfA(buf, "[%02d:%02d:%02d] %s\r\n",
+                      st.wHour, st.wMinute, st.wSecond, msg);
+    DWORD written = 0;
+    if (n > 0) WriteFile(h, buf, static_cast<DWORD>(n), &written, nullptr);
+    CloseHandle(h);
+}
 
 // Hotkey input thread. Runs independently of the DX12 Present hook so
 // F7 / F8 keep working even when the overlay fails to attach (e.g. when
@@ -101,28 +138,35 @@ void mod_main() {
     // The game module needs to be loaded and its main structures initialized
     // before we can scan for signatures and install hooks
     Sleep(5000);
+    append_marker("mod_main entered (post-5s wait)");
 
     try {
         // Load configuration
         cdcoop::reload_config();
+        append_marker("config loaded");
         setup_logging();
+        append_marker("logging started (see cdcoop.log from here on)");
 
         spdlog::info("Initializing CrimsonDesertCoop...");
 
         // Step 1: Initialize the hook manager (finds game module, sets up sig scanning)
         if (!cdcoop::HookManager::instance().initialize()) {
             spdlog::critical("Failed to initialize hook manager!");
+            append_marker("FAIL: hook manager init returned false");
             return;
         }
         spdlog::info("Hook manager initialized. Game base: 0x{:X}",
                       cdcoop::HookManager::instance().game_base());
+        append_marker("hook manager initialized");
 
         // Step 2: Initialize the player manager (finds player entity in memory)
         if (!cdcoop::PlayerManager::instance().initialize()) {
             spdlog::critical("Failed to initialize player manager!");
+            append_marker("FAIL: player manager init returned false");
             return;
         }
         spdlog::info("Player manager initialized");
+        append_marker("player manager initialized");
 
         // Step 3: Initialize sync systems
         cdcoop::PlayerSync::instance().initialize();
@@ -131,6 +175,7 @@ void mod_main() {
         cdcoop::MountSync::instance().initialize();
         cdcoop::AnimationSync::instance().initialize();
         spdlog::info("Sync systems initialized");
+        append_marker("sync systems initialized");
 
         // Step 4: Initialize companion hijack system
         if (!cdcoop::CompanionHijack::instance().initialize()) {
@@ -169,9 +214,17 @@ void mod_main() {
         spdlog::info("  Overlay: {}", overlay_ok ? "ON (F8 toggles)" : "OFF (Present hook failed)");
         spdlog::info("  F7 = host session, F8 = toggle overlay");
         spdlog::info("Waiting for session...");
+        append_marker(overlay_ok
+            ? "fully initialized — overlay ON, F7 to host / F8 to toggle"
+            : "fully initialized — overlay OFF (Present hook failed), F7 still hosts");
 
     } catch (const std::exception& e) {
         spdlog::critical("Fatal error during initialization: {}", e.what());
+        // Mirror into the marker so the failure is visible even if spdlog
+        // never opened cdcoop.log (the whole reason the marker exists).
+        char buf[512];
+        wsprintfA(buf, "FATAL: %s", e.what());
+        append_marker(buf);
     }
 }
 
