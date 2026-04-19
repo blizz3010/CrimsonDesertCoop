@@ -4,6 +4,7 @@
 #include <cdcoop/core/game_structures.h>
 #include <cdcoop/player/companion_hijack.h>
 #include <spdlog/spdlog.h>
+#include <cmath>
 
 namespace cdcoop {
 
@@ -296,9 +297,17 @@ void EnemySync::on_remote_enemy_damage(const uint8_t* data, size_t size) {
     auto* pkt = reinterpret_cast<const EnemyDamagePacket*>(data);
     spdlog::debug("Remote damage: enemy {} took {:.1f} damage", pkt->entity_id, pkt->damage);
 
-    // Validate damage is reasonable (anti-cheat: cap at 10x normal)
-    float max_reasonable_damage = 50000.0f;
-    float validated_damage = (pkt->damage > max_reasonable_damage) ? max_reasonable_damage : pkt->damage;
+    // Validate damage is reasonable. Clamp on BOTH sides — the previous
+    // code only gated the upper bound, so a peer (malicious or just
+    // sending a corrupted packet) could submit a negative damage value
+    // which would be subtracted from HP below and silently *heal* the
+    // enemy instead. Non-finite values get zeroed so NaN/inf can't
+    // propagate into new_hp arithmetic below.
+    constexpr float MAX_REASONABLE_DAMAGE = 50000.0f;
+    float d = pkt->damage;
+    if (!std::isfinite(d) || d < 0.0f) d = 0.0f;
+    else if (d > MAX_REASONABLE_DAMAGE) d = MAX_REASONABLE_DAMAGE;
+    float validated_damage = d;
 
     // Find the enemy and apply damage by reducing current HP
     auto& rt = get_runtime_offsets();
