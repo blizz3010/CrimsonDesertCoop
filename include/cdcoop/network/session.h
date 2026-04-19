@@ -84,6 +84,11 @@ public:
     std::string peer_name() const;
     float ping_ms() const { return ping_ms_; }
 
+    // Open the Steam overlay's "Invite to game" dialog. Only meaningful
+    // when using Steam networking and currently hosting; no-op and log
+    // otherwise. The overlay's Host panel exposes this as a button.
+    void invite_friend();
+
 private:
     Session() = default;
 

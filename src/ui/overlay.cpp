@@ -89,10 +89,15 @@ void Overlay::render_session_panel() {
         }
         case SessionState::HOSTING: {
             ImGui::Text("Hosting... Waiting for player 2");
-            ImGui::Text("Share your Steam ID or invite a friend");
+            if (ImGui::Button("Invite Friend (Steam)")) {
+                session.invite_friend();
+            }
+            ImGui::SameLine();
             if (ImGui::Button("Cancel")) {
                 session.leave_session();
             }
+            ImGui::TextDisabled("Tip: the friend can also right-click your name "
+                                "in Steam and pick \"Join Game\".");
             break;
         }
         case SessionState::CONNECTING: {

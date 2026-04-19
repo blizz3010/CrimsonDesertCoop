@@ -43,6 +43,15 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// Install a persistent listener that handles incoming Steam lobby
+// invites even before any session transport exists. Call once at mod
+// startup; the listener lives until remove_steam_invite_listener() or
+// mod shutdown. Required for the "friend clicks Join Game / Accept
+// Invite" flow to work out-of-the-box — otherwise the callback has
+// no registered handler when there's no active session.
+void install_steam_invite_listener();
+void remove_steam_invite_listener();
+
 } // namespace cdcoop
 
 #endif // CDCOOP_STEAM
