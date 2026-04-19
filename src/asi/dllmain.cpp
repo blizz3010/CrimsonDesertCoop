@@ -69,6 +69,19 @@ void append_marker(const char* msg) {
 std::atomic<bool> g_input_thread_exit{false};
 std::thread g_input_thread;
 
+// Fallback tick thread. The Present hook is the normal driver of
+// Session::update + PlayerSync/EnemySync/WorldSync/MountSync/PlayerManager
+// update, which means packet polling, heartbeats, and timeout detection
+// all depend on DXGI Present being hooked. When that hook fails to
+// install (same conditions that kill the overlay), a session can be
+// created via F7 but never actually exchange a packet — the peer never
+// sees the handshake and the session looks dead. This thread runs the
+// same update chain at ~60Hz *only* when the Present hook didn't take
+// over, so Evan's "no overlay, no friends, mod looks dead" path finally
+// has a heartbeat.
+std::atomic<bool> g_fallback_tick_exit{false};
+std::thread g_fallback_tick_thread;
+
 void input_poll_loop() {
     const auto& cfg = cdcoop::get_config();
     const int host_key   = cfg.open_session_key;
@@ -108,6 +121,41 @@ void input_poll_loop() {
     }
 
     spdlog::info("Input thread exited");
+}
+
+// Mirrors the update chain driven by the DX12 Present hook in
+// src/ui/imgui_impl_dx12.cpp. Only started when the Present hook
+// failed to install, so the two tickers never race.
+void fallback_tick_loop() {
+    LARGE_INTEGER freq, last;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&last);
+
+    spdlog::info("Fallback tick thread started — Present hook unavailable, "
+                 "driving session/sync updates from here at ~60Hz");
+
+    while (!g_fallback_tick_exit.load(std::memory_order_relaxed)) {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        float dt = static_cast<float>(now.QuadPart - last.QuadPart) /
+                   static_cast<float>(freq.QuadPart);
+        last = now;
+        if (dt > 0.1f) dt = 0.1f; // clamp to match Present-path behavior
+
+        auto& session = cdcoop::Session::instance();
+        if (session.is_active()) {
+            session.update(dt);
+            cdcoop::PlayerSync::instance().update(dt);
+            cdcoop::EnemySync::instance().update(dt);
+            cdcoop::WorldSync::instance().update(dt);
+        }
+        cdcoop::MountSync::instance().update(dt);
+        cdcoop::PlayerManager::instance().update(dt);
+
+        Sleep(16);
+    }
+
+    spdlog::info("Fallback tick thread exited");
 }
 
 void setup_logging() {
@@ -201,6 +249,15 @@ void mod_main() {
         // for hotkey handling now (de-duplicated with the Present hook).
         g_input_thread = std::thread(input_poll_loop);
 
+        // Step 6b: If the Present hook failed, nothing will drive
+        // Session::update / sync updates / transport->poll(), so a
+        // session created via F7 would connect but never exchange
+        // packets. Spin up the fallback tick thread to cover that gap.
+        if (!overlay_ok) {
+            g_fallback_tick_thread = std::thread(fallback_tick_loop);
+            append_marker("fallback tick thread started (overlay off)");
+        }
+
         // Step 7: Install the persistent Steam invite listener so a
         // friend's "Accept Invite" / "Join Game" click spins up a
         // session even if the user hasn't opened the overlay yet.
@@ -271,11 +328,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     } else if (reason == DLL_PROCESS_DETACH) {
         spdlog::info("CrimsonDesertCoop shutting down...");
 
-        // Stop the hotkey thread before anything else so it can't observe
-        // half-torn-down singletons during its next poll.
+        // Stop worker threads before anything else so they can't observe
+        // half-torn-down singletons during their next tick.
         g_input_thread_exit.store(true, std::memory_order_relaxed);
+        g_fallback_tick_exit.store(true, std::memory_order_relaxed);
         if (g_input_thread.joinable()) {
             g_input_thread.join();
+        }
+        if (g_fallback_tick_thread.joinable()) {
+            g_fallback_tick_thread.join();
         }
 
 #if CDCOOP_STEAM
