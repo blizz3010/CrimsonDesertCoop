@@ -5,6 +5,7 @@
 #include <cdcoop/core/hooks.h>
 #include <spdlog/spdlog.h>
 #include <Windows.h>
+#include <cmath>
 
 namespace cdcoop {
 
@@ -134,6 +135,14 @@ void MountSync::broadcast(const MountView& view) {
 void MountSync::on_remote_mount_state(const uint8_t* data, size_t size) {
     if (size < sizeof(MountStatePacket)) return;
     auto* pkt = reinterpret_cast<const MountStatePacket*>(data);
+
+    // Reject non-finite stats so the overlay doesn't end up rendering
+    // "nan / nan" bars if a corrupted packet arrives.
+    if (!std::isfinite(pkt->health) || !std::isfinite(pkt->max_health) ||
+        !std::isfinite(pkt->stamina) || !std::isfinite(pkt->max_stamina)) {
+        spdlog::warn("Dropping non-finite remote mount-state packet");
+        return;
+    }
 
     remote_.is_mounted      = (pkt->is_mounted != 0);
     remote_.health          = pkt->health;
