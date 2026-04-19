@@ -24,8 +24,11 @@ struct SteamNetworkTransport::Impl {
     std::string peer_name_str;
 };
 
-// Connection status change callback - uses g_active_transport to update state
-static void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
+// Connection status change callback - uses g_active_transport to update state.
+// Declared as friend in steam_network.h so we can access the private Impl;
+// therefore it must have external linkage (no `static`) to match the
+// friend declaration. Address-taken via reinterpret_cast below.
+void on_connection_status_changed(SteamNetConnectionStatusChangedCallback_t* info) {
     spdlog::info("Steam: connection status changed to {}", static_cast<int>(info->m_info.m_eState));
 
     if (!g_active_transport || !g_active_transport->impl_) return;

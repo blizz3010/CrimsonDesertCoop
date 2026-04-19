@@ -345,7 +345,7 @@ bool HookManager::resolve_world_system() {
     // These use RIP-relative addressing to find the WorldSystem singleton
 
     auto try_rip_resolve = [&](const char* sig, const char* name,
-                                int rip_offset, int rip_end) -> bool {
+                                int rip_offset, [[maybe_unused]] int rip_end) -> bool {
         auto result = sig_scan(sig, name);
         if (!result) return false;
 
@@ -538,38 +538,14 @@ void __cdecl player_position_detour(void* player, float x, float y, float z) {
     player_position_hook.call<void>(player, x, y, z);
 
     // The POSITION_PRIMARY/FALLBACK AOBs hit a mid-function position
-    // write, not a function entry, so the (x, y, z) detour args are not
-    // a reliable source of position data — only x lines up with xmm0
-    // by coincidence; y and z are whatever the registers next to it
-    // happen to hold. Always read position + rotation from the verified
-    // pointer chain instead. The arg list is preserved purely so the
-    // .call<>() to the original prologue compiles.
+    // write — (x, y, z) are not reliable data at a mid-function site.
+    // The only purpose of this detour now is to confirm "game is writing
+    // player position" so the debug overlay can show TRACKING vs WAITING.
+    // Actual broadcast is driven by PlayerSync::update() at 30Hz using
+    // the same verified pointer chain, which avoids the ~2x duplicate-
+    // send rate we had when this detour also broadcast.
     (void)player; (void)x; (void)y; (void)z;
-
-    auto& rt = get_runtime_offsets();
-    rt.position_resolved = true;
-
-    // Broadcast our position to peer
-    if (!Session::instance().is_active()) return;
-    if (!is_valid_ptr(rt.player_actor_ptr)) return;
-
-    uintptr_t player_core = resolve_ptr_chain(rt.player_actor_ptr, {
-        offsets::Player::ACTOR_TO_INNER, offsets::Player::INNER_TO_CORE
-    });
-    if (!is_valid_ptr(player_core)) return;
-
-    uintptr_t pos_struct = resolve_ptr_chain(player_core, {
-        offsets::Player::POS_OWNER_TO_STRUCT
-    });
-    if (!is_valid_ptr(pos_struct)) return;
-
-    Vec3 pos{
-        read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_X),
-        read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Y),
-        read_mem<float>(pos_struct, offsets::Player::POS_STRUCT_Z)
-    };
-    Quat rot = read_mem<Quat>(pos_struct, offsets::Player::ROTATION_QUAT);
-    PlayerSync::instance().on_local_position_changed(pos, rot, {0, 0, 0}, 0);
+    get_runtime_offsets().position_resolved = true;
 }
 
 void __cdecl player_animation_detour(void* player, uint32_t anim_id, float blend) {
