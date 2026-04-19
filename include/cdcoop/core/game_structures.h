@@ -1009,17 +1009,37 @@ struct RuntimeOffsets {
 // Global runtime offsets instance
 RuntimeOffsets& get_runtime_offsets();
 
-// Helper to read game memory safely (with null check)
+// Minimum valid pointer address (below this is likely invalid)
+constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
+
+// x64 Windows user-mode caps at ~0x00007FFF'FFFFFFFF (47-bit canonical).
+// Anything at/above this is kernel space or non-canonical garbage —
+// dereferencing triggers an instant GPF. The common failure mode this
+// guards is a read of uninitialised / garbage memory producing a
+// sign-extended value like 0xFFFF'FFFF'CD00'3010, which passes the
+// lower-bound check but crashes on deref.
+constexpr uintptr_t kMaximumUserPointerAddress = 0x00007FFFFFFFFFFFull;
+
+inline bool is_valid_ptr(uintptr_t addr) {
+    return addr >= kMinimumPointerAddress &&
+           addr <= kMaximumUserPointerAddress;
+}
+
+// Helper to read game memory safely. Rejects both null and obviously-
+// bogus pointers (too-low static / zero-page addresses, and too-high
+// sign-extended / kernel addresses) — the latter is the real win over
+// a bare base==0 check because a garbage base in that high range would
+// previously pass and crash on deref.
 template<typename T>
 T read_mem(uintptr_t base, uint32_t offset) {
-    if (base == 0) return T{};
+    if (!is_valid_ptr(base)) return T{};
     auto* ptr = reinterpret_cast<T*>(base + offset);
     return *ptr;
 }
 
 template<typename T>
 bool write_mem(uintptr_t base, uint32_t offset, const T& value) {
-    if (base == 0) return false;
+    if (!is_valid_ptr(base)) return false;
     *reinterpret_cast<T*>(base + offset) = value;
     return true;
 }
@@ -1034,13 +1054,6 @@ uintptr_t resolve_ptr_chain(uintptr_t base, std::initializer_list<uint32_t> offs
 // Read-only; does not mutate memory.
 uint32_t dynamic_scan_float(uintptr_t base, uint32_t min_off, uint32_t max_off,
                             uint32_t stride, float plausible_min, float plausible_max);
-
-// Minimum valid pointer address (below this is likely invalid)
-constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
-
-inline bool is_valid_ptr(uintptr_t addr) {
-    return addr >= kMinimumPointerAddress;
-}
 
 // Check whether `entity` is a ChildActor (companion, summoned NPC, etc.)
 // by comparing its vtable pointer against the resolved ChildActor vtable.
