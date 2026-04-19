@@ -238,22 +238,9 @@ static HRESULT __stdcall present_detour(IDXGISwapChain* swap_chain, UINT sync_in
         cdcoop::MountSync::instance().update(delta_time);
         cdcoop::PlayerManager::instance().update(delta_time);
 
-        // Hotkey processing
-        static bool f7_was_pressed = false;
-        bool f7_pressed = (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
-        if (f7_pressed && !f7_was_pressed) {
-            if (session.state() == cdcoop::SessionState::DISCONNECTED) {
-                session.host_session();
-            }
-        }
-        f7_was_pressed = f7_pressed;
-
-        static bool f8_was_pressed = false;
-        bool f8_pressed = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-        if (f8_pressed && !f8_was_pressed) {
-            cdcoop::Overlay::instance().toggle_visible();
-        }
-        f8_was_pressed = f8_pressed;
+        // Hotkey handling lives in the dedicated input thread (see
+        // dllmain.cpp::input_poll_loop). That path runs even when this
+        // Present hook failed to install, so F7/F8 are never silent.
     }
 
     // Start ImGui frame
