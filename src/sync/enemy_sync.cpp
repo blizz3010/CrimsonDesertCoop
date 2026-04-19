@@ -250,6 +250,17 @@ void EnemySync::on_remote_enemy_state(const uint8_t* data, size_t size) {
     if (size < sizeof(EnemyStatePacket)) return;
     auto* pkt = reinterpret_cast<const EnemyStatePacket*>(data);
 
+    // Reject non-finite position/health before writing anything into the
+    // enemy's stat/position struct. Same failure mode as PR #41 for
+    // players — a NaN write corrupts the entity and the engine handles
+    // it very badly on the next physics step.
+    if (!std::isfinite(pkt->position.x) || !std::isfinite(pkt->position.y) ||
+        !std::isfinite(pkt->position.z) || !std::isfinite(pkt->health)) {
+        spdlog::warn("Dropping non-finite remote enemy-state packet (eid={})",
+                     pkt->entity_id);
+        return;
+    }
+
     // Client receives authoritative enemy state from host.
     // Find the local enemy entity by scanning body slots and matching entity_id.
     auto& rt = get_runtime_offsets();
