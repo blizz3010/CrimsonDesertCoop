@@ -116,7 +116,12 @@ private:
     // reset, which is UB. Lock scope is the whole transition.
     std::mutex transition_mutex_;
 
-    uint32_t sequence_ = 0;
+    // Atomic so concurrent send() calls (tick thread, packet-handler
+    // thread, hook detour threads) don't race on the post-increment.
+    // The actual ordering between calls doesn't matter — sequence is
+    // informational, not used for retransmit — but plain ++ on a
+    // non-atomic uint32_t from multiple threads is UB.
+    std::atomic<uint32_t> sequence_{0};
     float heartbeat_timer_ = 0.0f;
     float ping_ms_ = 0.0f;
     float time_since_last_recv_ = 0.0f;
