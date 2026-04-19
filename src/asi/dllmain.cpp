@@ -179,6 +179,20 @@ void setup_logging() {
 
     spdlog::info("=== CrimsonDesertCoop v{} ===", CDCOOP_VERSION);
     spdlog::info("Log level: {}", cfg.log_level);
+    // Log the resolved DLL directory so wrong-folder installs become
+    // obvious at a glance ("oh, my .asi is in /AppData/Local/Steam/...
+    // not next to CrimsonDesert.exe"). Same path also anchors the
+    // log file you're reading and cdcoop_config.json.
+    spdlog::info("Mod directory: {}", cdcoop::self_module_dir());
+
+    // Dump the game's process info so a user-shared log immediately
+    // shows whether the .asi got loaded into CrimsonDesert.exe vs the
+    // launcher / Steam helper / something unexpected.
+    char exe_path[MAX_PATH] = {};
+    DWORD exe_len = GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+    if (exe_len > 0 && exe_len < MAX_PATH) {
+        spdlog::info("Host process: {} (PID {})", exe_path, GetCurrentProcessId());
+    }
 }
 
 void mod_main() {
