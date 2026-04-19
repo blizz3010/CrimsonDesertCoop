@@ -266,18 +266,70 @@ void HookManager::scan_world_system_siblings() {
     constexpr uint32_t kEnd   = 0x100;
     constexpr uint32_t kStep  = 0x08; // pointer-aligned
 
+    // Helper: check whether an address range is within committed memory.
+    auto addr_committed = [&](uintptr_t addr, size_t bytes = 1) -> bool {
+        MEMORY_BASIC_INFORMATION local_mbi{};
+        if (VirtualQuery(reinterpret_cast<void*>(addr), &local_mbi, sizeof(local_mbi)) == 0)
+            return false;
+        if (!(local_mbi.State & MEM_COMMIT)) return false;
+        uintptr_t region_end = reinterpret_cast<uintptr_t>(local_mbi.BaseAddress) + local_mbi.RegionSize;
+        return addr + bytes <= region_end;
+    };
+
     // Helper: read a vtable function pointer at index i, return its RVA
-    // within the game module if it lies inside, else 0. Bounded by
-    // VirtualQuery so we never read garbage.
+    // within the game module if it lies inside, else 0.
     auto vfunc_rva = [&](uintptr_t vtable, int i) -> uintptr_t {
         uintptr_t slot_addr = vtable + static_cast<uintptr_t>(i * 8);
-        MEMORY_BASIC_INFORMATION local_mbi{};
-        if (VirtualQuery(reinterpret_cast<void*>(slot_addr), &local_mbi, sizeof(local_mbi)) == 0)
-            return 0;
-        if (!(local_mbi.State & MEM_COMMIT)) return 0;
+        if (!addr_committed(slot_addr, sizeof(uintptr_t))) return 0;
         uintptr_t fn = *reinterpret_cast<uintptr_t*>(slot_addr);
         if (fn < game_base_ || fn >= game_base_ + game_size_) return 0;
         return fn - game_base_;
+    };
+
+    // Helper: extract the MSVC-decorated RTTI class name from a vtable.
+    // MSVC x64 layout:
+    //   [vtable - 8]  -> RTTICompleteObjectLocator*
+    //   COL + 0x0C    : pTypeDescriptor (32-bit image-base-relative offset)
+    //   TypeDesc + 0x10 : decorated name, null-terminated C string (e.g.
+    //                     ".?AVSomeClass@pa@@")
+    // Every dereference is bounded by addr_committed + module-range checks
+    // so a bad vtable just returns an empty string. The decorated name is
+    // kept verbatim — even un-demangled it contains the plain class name
+    // between the ".?AV" / ".?AU" prefix and the "@@" suffix, which is
+    // exactly what a community submitter needs to cross-reference against
+    // an IDA / Ghidra RTTI dump.
+    auto rtti_class_name = [&](uintptr_t vtable, char* out, size_t out_size) {
+        out[0] = '\0';
+        if (out_size < 2) return;
+
+        if (vtable < game_base_ || vtable >= game_base_ + game_size_) return;
+        uintptr_t col_slot = vtable - sizeof(uintptr_t);
+        if (!addr_committed(col_slot, sizeof(uintptr_t))) return;
+        uintptr_t col_ptr = *reinterpret_cast<uintptr_t*>(col_slot);
+        if (col_ptr < game_base_ || col_ptr + 0x10 > game_base_ + game_size_) return;
+
+        uint32_t type_desc_rva = *reinterpret_cast<uint32_t*>(col_ptr + 0x0C);
+        if (type_desc_rva == 0) return;
+        uintptr_t type_desc = game_base_ + type_desc_rva;
+        if (type_desc < game_base_ || type_desc + 0x20 > game_base_ + game_size_) return;
+
+        const char* name = reinterpret_cast<const char*>(type_desc + 0x10);
+        if (!addr_committed(reinterpret_cast<uintptr_t>(name), 1)) return;
+
+        // Copy at most out_size-1 bytes, stopping at NUL or at the end of
+        // committed memory. Bounded loop — never reads past the region.
+        size_t i = 0;
+        while (i < out_size - 1) {
+            if (!addr_committed(reinterpret_cast<uintptr_t>(name + i), 1)) break;
+            char c = name[i];
+            if (c == '\0') break;
+            // Keep printable ASCII only; if we hit a garbage byte the
+            // vtable probably wasn't a real one, so give up cleanly.
+            if (c < 0x20 || c > 0x7E) { out[0] = '\0'; return; }
+            out[i] = c;
+            i++;
+        }
+        out[i] = '\0';
     };
 
     MEMORY_BASIC_INFORMATION mbi{};
@@ -302,19 +354,25 @@ void HookManager::scan_world_system_siblings() {
         // First 4 vfunc RVAs are a stable behavioural fingerprint — they
         // typically include destructor + a couple of class-specific
         // virtuals. Logging them makes the probe output identifiable
-        // against any RTTI dump or x64dbg symbol cross-reference, which
-        // is exactly what we need community submitters to match against.
+        // against any RTTI dump or x64dbg symbol cross-reference.
         uintptr_t f0 = 0, f1 = 0, f2 = 0, f3 = 0;
+        char class_name[128] = {};
         if (vtable_rva != 0) {
             f0 = vfunc_rva(vtable, 0);
             f1 = vfunc_rva(vtable, 1);
             f2 = vfunc_rva(vtable, 2);
             f3 = vfunc_rva(vtable, 3);
+            // MSVC decorated RTTI name (e.g. ".?AVQuestManager@pa@@").
+            // Most useful piece of probe telemetry: a community submitter
+            // can read this directly instead of cross-referencing RVAs.
+            rtti_class_name(vtable, class_name, sizeof(class_name));
         }
 
         logger->info("ws+0x{:02X}: sibling=0x{:X} vtable=0x{:X} (RVA 0x{:X}) "
-                     "vfuncs=[0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}]",
-                     off, sibling, vtable, vtable_rva, f0, f1, f2, f3);
+                     "class='{}' vfuncs=[0x{:X}, 0x{:X}, 0x{:X}, 0x{:X}]",
+                     off, sibling, vtable, vtable_rva,
+                     class_name[0] ? class_name : "(unknown)",
+                     f0, f1, f2, f3);
 
         // Best-effort heuristic caching. These are stored as "candidates"
         // only; the names are community guesses and may be wrong.
