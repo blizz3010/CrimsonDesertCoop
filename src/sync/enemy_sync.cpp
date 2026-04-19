@@ -144,15 +144,21 @@ void EnemySync::on_enemy_spawn(uint32_t entity_id, const Vec3& pos, uint32_t typ
 }
 
 void EnemySync::report_damage(uint32_t entity_id, float damage) {
-    // Client reports damage to host for validation
+    // Called from the damage_calc_detour every time the player hits an
+    // enemy, including when nobody is in a session. Skip the allocation
+    // + serialise + transport-null-check work in that case so we don't
+    // burn cycles on every swing during single-player play.
+    auto& session = Session::instance();
+    if (!session.is_active()) return;
+
     EnemyDamagePacket pkt{};
     pkt.header.type = PacketType::ENEMY_DAMAGE;
     pkt.header.payload_size = sizeof(pkt) - sizeof(PacketHeader);
     pkt.entity_id = entity_id;
     pkt.damage = damage;
-    pkt.damage_source = Session::instance().is_host() ? 0 : 1;
+    pkt.damage_source = session.is_host() ? 0 : 1;
 
-    Session::instance().send_packet(pkt, true);
+    session.send_packet(pkt, true);
 }
 
 void EnemySync::apply_coop_scaling() {
