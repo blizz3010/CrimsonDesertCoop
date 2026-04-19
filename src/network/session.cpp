@@ -169,6 +169,25 @@ std::string Session::peer_name() const {
     return transport_ ? transport_->peer_name() : "";
 }
 
+void Session::invite_friend() {
+    if (role_ != SessionRole::HOST) {
+        spdlog::info("Invite: ignored — not hosting");
+        return;
+    }
+#if CDCOOP_STEAM
+    // SteamNetworkTransport is the only implementation we have that
+    // knows about lobbies; the abstract INetworkTransport interface
+    // deliberately doesn't include invite_friend because it's a Steam-
+    // specific concept. Downcast is safe here because host_session
+    // only ever constructs SteamNetworkTransport when cfg.use_steam.
+    if (auto* steam = dynamic_cast<SteamNetworkTransport*>(transport_.get())) {
+        steam->invite_friend();
+        return;
+    }
+#endif
+    spdlog::warn("Invite: Steam networking disabled — share Steam ID manually");
+}
+
 void Session::on_packet_received(PacketType type, const uint8_t* data, size_t size) {
     time_since_last_recv_ = 0.0f;
 

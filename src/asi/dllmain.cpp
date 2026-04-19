@@ -11,6 +11,7 @@
 #include <cdcoop/core/hooks.h>
 #include <cdcoop/core/config.h>
 #include <cdcoop/network/session.h>
+#include <cdcoop/network/steam_network.h>
 #include <cdcoop/sync/player_sync.h>
 #include <cdcoop/sync/enemy_sync.h>
 #include <cdcoop/sync/world_sync.h>
@@ -149,6 +150,15 @@ void mod_main() {
         // for hotkey handling now (de-duplicated with the Present hook).
         g_input_thread = std::thread(input_poll_loop);
 
+        // Step 7: Install the persistent Steam invite listener so a
+        // friend's "Accept Invite" / "Join Game" click spins up a
+        // session even if the user hasn't opened the overlay yet.
+#if CDCOOP_STEAM
+        if (cdcoop::get_config().use_steam_networking) {
+            cdcoop::install_steam_invite_listener();
+        }
+#endif
+
         spdlog::info("CrimsonDesertCoop fully initialized!");
         spdlog::info("  Overlay: {}", overlay_ok ? "ON (F8 toggles)" : "OFF (Present hook failed)");
         spdlog::info("  F7 = host session, F8 = toggle overlay");
@@ -176,6 +186,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             g_input_thread.join();
         }
 
+#if CDCOOP_STEAM
+        cdcoop::remove_steam_invite_listener();
+#endif
         cdcoop::Overlay::instance().shutdown();
         cdcoop::CompanionHijack::instance().shutdown();
         cdcoop::MountSync::instance().shutdown();
