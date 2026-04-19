@@ -161,7 +161,9 @@ void CompanionHijack::set_position(const Vec3& pos, const Quat& rot) {
     write_mem<float>(hijacked_entity_, offsets::Player::POSITION_Z, pos.z);
 }
 
-void CompanionHijack::set_animation(uint32_t anim_id, float blend, float speed, float time) {
+void CompanionHijack::set_animation(uint32_t anim_id, float blend,
+                                     [[maybe_unused]] float speed,
+                                     [[maybe_unused]] float time) {
     if (!active_ || !is_valid_ptr(hijacked_entity_)) return;
 
     // Write animation state to the companion entity.

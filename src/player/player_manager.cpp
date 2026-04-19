@@ -30,7 +30,7 @@ void PlayerManager::shutdown() {
     game_instance_ = 0;
 }
 
-void PlayerManager::update(float delta_time) {
+void PlayerManager::update([[maybe_unused]] float delta_time) {
     // Re-acquire player pointer if lost (e.g., after loading screen)
     if (local_player_ == 0) {
         find_local_player();

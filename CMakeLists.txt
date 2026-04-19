@@ -127,6 +127,12 @@ target_compile_definitions(cdcoop_core PUBLIC
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     CDCOOP_VERSION="${PROJECT_VERSION}"
+    # Silence MSVC C4996 "strncpy unsafe" warnings. The Steamworks SDK
+    # headers (matchmakingtypes.h etc.) use strncpy unconditionally and
+    # we don't control their sources. Applying it project-wide also
+    # covers our own session.cpp calls; they're fine in context — fixed
+    # buffer, known-safe-size.
+    _CRT_SECURE_NO_WARNINGS
 )
 
 # Warning level - catch common issues at compile time. Only applied to

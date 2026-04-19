@@ -39,7 +39,7 @@ void WorldSync::initialize() {
 
 void WorldSync::shutdown() {}
 
-void WorldSync::update(float delta_time) {
+void WorldSync::update([[maybe_unused]] float delta_time) {
     // World sync is event-driven, no periodic updates needed
 }
 
