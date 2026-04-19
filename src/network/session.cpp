@@ -26,26 +26,31 @@ bool Session::host_session() {
 
     auto& cfg = get_config();
 
+    std::shared_ptr<INetworkTransport> t;
 #if CDCOOP_STEAM
     if (cfg.use_steam_networking) {
-        transport_ = std::make_unique<SteamNetworkTransport>();
+        t = std::make_shared<SteamNetworkTransport>();
     }
 #endif
 
-    if (!transport_) {
+    if (!t) {
         spdlog::error("No network transport available");
         return false;
     }
 
-    transport_->set_packet_callback([this](PacketType type, const uint8_t* data, size_t size) {
+    t->set_packet_callback([this](PacketType type, const uint8_t* data, size_t size) {
         on_packet_received(type, data, size);
     });
 
-    if (!transport_->host(cfg.port)) {
+    if (!t->host(cfg.port)) {
         spdlog::error("Failed to start hosting on port {}", cfg.port);
         return false;
     }
 
+    {
+        std::lock_guard tlock(transport_mutex_);
+        transport_ = std::move(t);
+    }
     role_ = SessionRole::HOST;
     state_ = SessionState::HOSTING;
     spdlog::info("Hosting co-op session on port {}...", cfg.port);
@@ -64,26 +69,31 @@ bool Session::join_session(const std::string& target) {
 
     auto& cfg = get_config();
 
+    std::shared_ptr<INetworkTransport> t;
 #if CDCOOP_STEAM
     if (cfg.use_steam_networking) {
-        transport_ = std::make_unique<SteamNetworkTransport>();
+        t = std::make_shared<SteamNetworkTransport>();
     }
 #endif
 
-    if (!transport_) {
+    if (!t) {
         spdlog::error("No network transport available");
         return false;
     }
 
-    transport_->set_packet_callback([this](PacketType type, const uint8_t* data, size_t size) {
+    t->set_packet_callback([this](PacketType type, const uint8_t* data, size_t size) {
         on_packet_received(type, data, size);
     });
 
-    if (!transport_->connect(target, cfg.port)) {
+    if (!t->connect(target, cfg.port)) {
         spdlog::error("Failed to connect to {}", target);
         return false;
     }
 
+    {
+        std::lock_guard tlock(transport_mutex_);
+        transport_ = std::move(t);
+    }
     role_ = SessionRole::CLIENT;
     state_ = SessionState::CONNECTING;
     spdlog::info("Connecting to {}...", target);
@@ -111,14 +121,28 @@ void Session::leave_session() {
     PlayerManager::instance().despawn_remote_player();
     EnemySync::instance().revert_coop_scaling();
 
-    if (transport_) {
-        // Send disconnect packet
+    // Snapshot the transport, then publish nullptr so concurrent send()
+    // / update() / poll() callers stop using it. Their already-held
+    // shared_ptr copies keep the object alive until they return; we
+    // hold our own copy here for the disconnect/cleanup sequence.
+    std::shared_ptr<INetworkTransport> t;
+    {
+        std::lock_guard tlock(transport_mutex_);
+        t = std::move(transport_);
+    }
+
+    if (t) {
+        // Send disconnect packet over the captured transport directly,
+        // bypassing send() since transport_ is already null.
         PacketHeader dc{};
         dc.type = PacketType::DISCONNECT;
         dc.payload_size = 0;
-        send(reinterpret_cast<const uint8_t*>(&dc), sizeof(dc));
-        transport_->disconnect();
-        transport_.reset();
+        if (t->is_connected()) {
+            t->send(reinterpret_cast<const uint8_t*>(&dc), sizeof(dc), true);
+        }
+        t->disconnect();
+        // t goes out of scope below — actual destruction happens once
+        // every other shared_ptr copy in flight has been released.
     }
 
     state_ = SessionState::DISCONNECTED;
@@ -128,25 +152,35 @@ void Session::leave_session() {
 }
 
 void Session::send(const uint8_t* data, size_t size, bool reliable) {
-    if (transport_ && transport_->is_connected()) {
+    std::shared_ptr<INetworkTransport> t;
+    {
+        std::lock_guard lock(transport_mutex_);
+        t = transport_;
+    }
+    if (t && t->is_connected()) {
         if (size >= sizeof(PacketHeader)) {
             // Copy packet data to stamp sequence/timestamp without mutating caller's data
             std::vector<uint8_t> buf(data, data + size);
             auto* hdr = reinterpret_cast<PacketHeader*>(buf.data());
             hdr->sequence = sequence_++;
             hdr->timestamp_ms = static_cast<uint32_t>(GetTickCount64() & 0xFFFFFFFF);
-            transport_->send(buf.data(), buf.size(), reliable);
+            t->send(buf.data(), buf.size(), reliable);
         } else {
-            transport_->send(data, size, reliable);
+            t->send(data, size, reliable);
         }
     }
 }
 
 void Session::update(float delta_time) {
-    if (!transport_) return;
+    std::shared_ptr<INetworkTransport> t;
+    {
+        std::lock_guard lock(transport_mutex_);
+        t = transport_;
+    }
+    if (!t) return;
 
     // Poll for incoming messages
-    transport_->poll();
+    t->poll();
 
     // Heartbeat
     heartbeat_timer_ += delta_time;
@@ -171,7 +205,12 @@ void Session::register_handler(PacketType type, PacketCallback handler) {
 }
 
 std::string Session::peer_name() const {
-    return transport_ ? transport_->peer_name() : "";
+    std::shared_ptr<INetworkTransport> t;
+    {
+        std::lock_guard lock(transport_mutex_);
+        t = transport_;
+    }
+    return t ? t->peer_name() : "";
 }
 
 void Session::invite_friend() {
@@ -180,12 +219,17 @@ void Session::invite_friend() {
         return;
     }
 #if CDCOOP_STEAM
+    std::shared_ptr<INetworkTransport> t;
+    {
+        std::lock_guard lock(transport_mutex_);
+        t = transport_;
+    }
     // SteamNetworkTransport is the only implementation we have that
     // knows about lobbies; the abstract INetworkTransport interface
     // deliberately doesn't include invite_friend because it's a Steam-
     // specific concept. Downcast is safe here because host_session
     // only ever constructs SteamNetworkTransport when cfg.use_steam.
-    if (auto* steam = dynamic_cast<SteamNetworkTransport*>(transport_.get())) {
+    if (auto* steam = dynamic_cast<SteamNetworkTransport*>(t.get())) {
         steam->invite_friend();
         return;
     }

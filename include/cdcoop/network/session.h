@@ -98,7 +98,15 @@ private:
     void handle_handshake(const uint8_t* data, size_t size);
     void send_heartbeat();
 
-    std::unique_ptr<INetworkTransport> transport_;
+    // shared_ptr + brief mutex on every read so that leave_session()
+    // resetting the transport mid-flight doesn't race with another
+    // thread that's still inside transport_->send() / poll() /
+    // is_connected(). Reads copy the shared_ptr under transport_mutex_
+    // then operate on the copy lock-free; the transport's actual
+    // destruction is deferred until every outstanding shared_ptr
+    // releases. Fixes the residual UAF flagged in #33.
+    mutable std::mutex transport_mutex_;
+    std::shared_ptr<INetworkTransport> transport_;
     // Atomic because the render thread reads state/role via the public
     // accessors while the packet and input threads write on session
     // lifecycle transitions. Seq-cst store is fine — these switch a
