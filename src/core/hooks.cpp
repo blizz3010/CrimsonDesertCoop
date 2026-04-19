@@ -662,12 +662,18 @@ void* __cdecl companion_spawn_detour(void* spawn_params) {
 void __cdecl world_state_detour(void* world_obj, uint32_t state_id, uint32_t new_state) {
     world_state_hook.call<void>(world_obj, state_id, new_state);
 
-    if (Session::instance().is_active()) {
-        // Extract object ID from the world object pointer
-        uint32_t object_id = static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(world_obj) & 0xFFFFFFFF);
-        WorldSync::instance().on_world_interact(object_id, state_id, new_state);
-    }
+    // This detour is wired to the STAT_WRITE signature (player HP/
+    // stamina/spirit writes — see install_hooks "StatWrite"). Earlier
+    // code forwarded every call to WorldSync::on_world_interact, which
+    // sent a *reliable* WORLD_INTERACT packet for every stat tick.
+    // Stat writes can fire dozens of times per second during combat,
+    // so the channel was being flooded for no benefit — the receiver
+    // (WorldSync::on_remote_interact) is a debug-log-only stub, and
+    // player health is already broadcast at 5Hz via the PlayerSync
+    // full-state packet. Drop the broadcast; keep the hook installed
+    // so the original game function still runs and so the slot is
+    // available for future stat-event use without re-scanning AOBs.
+    (void)world_obj; (void)state_id; (void)new_state;
 }
 
 void __cdecl camera_detour(void* camera_struct, void* unused) {
