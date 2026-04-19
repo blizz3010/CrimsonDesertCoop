@@ -627,7 +627,13 @@ float __cdecl damage_calc_detour(void* attacker, void* target, float base_damage
         auto remote_entity = CompanionHijack::instance().get_entity_ptr();
         bool from_remote = (remote_entity != 0 && attacker_addr == remote_entity);
 
-        if (from_remote || attacker_addr == rt.player_actor_ptr) {
+        // Compare to player only when the player pointer has actually
+        // been resolved — otherwise both sides could be 0 and any null
+        // attacker would be misclassified as "the player swung this".
+        bool from_player = is_valid_ptr(rt.player_actor_ptr) &&
+                           attacker_addr == rt.player_actor_ptr;
+
+        if (from_remote || from_player) {
             // Report damage to EnemySync for co-op damage tracking
             // Use the target pointer as a simple entity ID
             uint32_t target_id = static_cast<uint32_t>(target_addr & 0xFFFFFFFF);
