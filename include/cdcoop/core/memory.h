@@ -36,4 +36,11 @@ public:
     static bool write_protected(uintptr_t addr, const void* data, size_t size);
 };
 
+// Absolute directory of the CrimsonDesertCoop.asi DLL itself, with a
+// trailing path separator. Used to anchor our log/marker files so they
+// land next to the DLL instead of the game process's CWD (which varies
+// by ASI loader and is not where users look for them). Empty string on
+// failure.
+std::string self_module_dir();
+
 } // namespace cdcoop

@@ -26,7 +26,8 @@ namespace {
 std::shared_ptr<spdlog::logger> worldprobe_logger() {
     static std::shared_ptr<spdlog::logger> logger = []() {
         try {
-            auto l = spdlog::basic_logger_mt("worldprobe", "cdcoop_world_probe.log", true);
+            auto l = spdlog::basic_logger_mt(
+                "worldprobe", self_module_dir() + "cdcoop_world_probe.log", true);
             l->set_pattern("%Y-%m-%d %H:%M:%S | %v");
             l->set_level(spdlog::level::info);
             return l;
