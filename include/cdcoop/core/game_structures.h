@@ -19,11 +19,15 @@ namespace cdcoop {
 //   - bbfox0703 (Nexus Mods #64 CT) - player base pointer, character pointer chains, inventory
 //   - Tuuuup! (FearLess Revolution) - ServerActor, ATK/DEF, max stats, base supply, item struct
 //
-// Game version: v1.01.03 / Table v1.0.6 (March 2026)
+// Game version: May 2026 public tables (bbfox CT v29 / OpenCheatTables),
+// with legacy v1.01 notes retained where older community projects still
+// publish the previous layout.
 //
-// New offsets (April 2026 research):
+// New offsets (April/May 2026 research):
 //   - bbfox0703 CT v1.0.6: reputation system (set/no-dec), HP capture (player+horse),
 //     item management AOBs, bag bonus, friendship, resistant attrs (pending extraction)
+//   - bbfox CT v29 / OpenCheatTables (May 2026): player stamina/spirit
+//     current offsets moved to +0x518 / +0x5A8 from the health-entry base.
 //   - FearLess community pages 14-16: horse HP confirmed as dynamic capture,
 //     dragon HP unresolved (may be float), mount pointer requires active riding
 //   - PA class names from CT: pa::ClientActorManager, pa::ClientChildOnlyInGameActor,
@@ -67,15 +71,21 @@ namespace StatEntry {
     constexpr int32_t STAMINA_ID      = 17;
     constexpr int32_t SPIRIT_ID       = 18;
 
-    // Cross-offsets between stat entries (from EquipHide actor_resolve.cpp):
-    // Given the health_entry address, stamina and spirit entries start at these
-    // offsets. The entry's current value is then at +StatEntry::CURRENT_VALUE (0x08).
-    //   stamina_current = *(int64*)(health_entry + STAMINA_FROM_HEALTH + CURRENT_VALUE)
-    //                   = health_entry + 0x480 + 0x08 = health_entry + 0x488
+    // Cross-offsets between stat entries. Given the health_entry address,
+    // stamina and spirit entries start at these offsets; current/max are then
+    // read at +CURRENT_VALUE / +MAX_VALUE inside the chosen entry.
+    //
+    // May 2026 public tables (bbfox CT v29 / OpenCheatTables):
+    //   stamina_current = health_entry + 0x510 + 0x08 = health_entry + 0x518
+    //   spirit_current  = health_entry + 0x5A0 + 0x08 = health_entry + 0x5A8
+    //
+    // Legacy v1.01/Orcax layout:
+    //   stamina_current = health_entry + 0x480 + 0x08 = health_entry + 0x488
     //   spirit_current  = health_entry + 0x510 + 0x08 = health_entry + 0x518
-    // This matches PlayerBase::STAMINA_OFFSET / SPIRIT_OFFSET below (0x488 / 0x518).
-    constexpr uint32_t STAMINA_FROM_HEALTH = 0x480; // stamina_entry = health_entry + 0x480
-    constexpr uint32_t SPIRIT_FROM_HEALTH  = 0x510; // spirit_entry  = health_entry + 0x510
+    constexpr uint32_t STAMINA_FROM_HEALTH = 0x510; // stamina_entry = health_entry + 0x510
+    constexpr uint32_t SPIRIT_FROM_HEALTH  = 0x5A0; // spirit_entry  = health_entry + 0x5A0
+    constexpr uint32_t LEGACY_STAMINA_FROM_HEALTH = 0x480;
+    constexpr uint32_t LEGACY_SPIRIT_FROM_HEALTH  = 0x510;
 }
 
 // Durability entry structure (from CrimsonDesert-player-status-modifier)
@@ -161,26 +171,26 @@ namespace PartInOutSocket {
 //   r13 points directly at the authoritative position vector
 //
 // Static base pointers (from CE tables, may break on patch):
-//   CrimsonDesert.exe+05CC7618  (bbfox0703, v1.01.03 - most recent)
+//   CrimsonDesert.exe+05CC7618  (bbfox0703, v1.01.03 - legacy fallback)
 //   CrimsonDesert.exe+05CE0928  (Send, v1.00.03)
 //   CrimsonDesert.exe+05EDB400  (FearLess community)
 //   CrimsonDesert.exe+05C008A0  (FearLess community)
 //
-// Verified full pointer chains (from bbfox0703 CT, game v1.01.03):
+// Verified full pointer chains (from bbfox0703 CT; stats refreshed in v29):
 //   Player base = CrimsonDesert.exe+5CC7618
 //   Health chain:  [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x08
-//   Stamina chain: [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x488
-//   Spirit chain:  [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x518
+//   Stamina chain: [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x518
+//   Spirit chain:  [base+0x18]+0xA0]+0xD0]+slot]+0x20]+0x18]+0x58]+0x5A8
 //   Character slot offsets: Kliff=0x68, Oongka=0xE0, Damiane=0x168
 // =========================================================================
 namespace offsets {
 
     // =========================================================================
-    // Static player base pointer (from bbfox0703 CT, v1.01.03)
+    // Static player base pointer (from bbfox0703 CT, v1.01.03 legacy fallback)
     // Use signature scanning (PLAYER_BASE_DISCOVERY) for dynamic resolution.
     // =========================================================================
     namespace PlayerBase {
-        constexpr uint32_t STATIC_RVA     = 0x05CC7618; // CrimsonDesert.exe+5CC7618 (v1.01.03)
+        constexpr uint32_t STATIC_RVA     = 0x05CC7618; // CrimsonDesert.exe+5CC7618 (v1.01.03 legacy)
 
         // Alternative base: pa::ClientActorManager (from bbfox0703 CT disassembly)
         // This is a different static pointer that also reaches the actor system.
@@ -220,19 +230,28 @@ namespace offsets {
         constexpr uint32_t ATK_OFFSET     = 0x00;   // int32 - attack power
         constexpr uint32_t DEF_OFFSET     = 0x08;   // int32 - defence
 
-        // Stat offsets within stats component (+0x58)
-        // Verified by both bbfox0703 (v1.01.03) and Tuuuup! (v1.01.02) CTs
-        constexpr uint32_t HEALTH_OFFSET  = 0x08;   // 4-byte current HP
-        constexpr uint32_t HEALTH_MAX     = 0x18;   // 4-byte max HP (from Tuuuup!)
-        constexpr uint32_t STAMINA_OFFSET = 0x488;  // 4-byte current stamina
-        constexpr uint32_t STAMINA_MAX    = 0x498;  // 4-byte max stamina (from Tuuuup!)
-        constexpr uint32_t SPIRIT_OFFSET  = 0x518;  // 4-byte current spirit
-        constexpr uint32_t SPIRIT_MAX     = 0x528;  // 4-byte max spirit (from Tuuuup!)
+        // Stat offsets within stats component (+0x58).
+        // Refreshed from bbfox CT v29 / OpenCheatTables in May 2026.
+        constexpr uint32_t HEALTH_OFFSET  = 0x08;   // int64 current HP
+        constexpr uint32_t HEALTH_MAX     = 0x18;   // int64 max HP (from Tuuuup!)
+        constexpr uint32_t STAMINA_OFFSET = 0x518;  // int64 current stamina
+        constexpr uint32_t STAMINA_MAX    = 0x528;  // int64 max stamina
+        constexpr uint32_t SPIRIT_OFFSET  = 0x5A8;  // int64 current spirit
+        constexpr uint32_t SPIRIT_MAX     = 0x5B8;  // int64 max spirit
+
+        // Legacy offsets from v1.01-era bbfox/Tuuuup!/Orcax sources. Kept so
+        // live validation code can fall back when users run an older build.
+        constexpr uint32_t LEGACY_STAMINA_OFFSET = 0x488;
+        constexpr uint32_t LEGACY_STAMINA_MAX    = 0x498;
+        constexpr uint32_t LEGACY_SPIRIT_OFFSET  = 0x518;
+        constexpr uint32_t LEGACY_SPIRIT_MAX     = 0x528;
 
         // Stat ID offsets (type identifiers within stats component, from Tuuuup!):
         constexpr uint32_t HEALTH_ID_OFF  = 0x00;   // HP stat type ID
-        constexpr uint32_t STAMINA_ID_OFF = 0x480;  // Stamina stat type ID
-        constexpr uint32_t SPIRIT_ID_OFF  = 0x510;  // Spirit stat type ID
+        constexpr uint32_t STAMINA_ID_OFF = 0x510;  // Stamina stat type ID
+        constexpr uint32_t SPIRIT_ID_OFF  = 0x5A0;  // Spirit stat type ID
+        constexpr uint32_t LEGACY_STAMINA_ID_OFF = 0x480;
+        constexpr uint32_t LEGACY_SPIRIT_ID_OFF  = 0x510;
 
         // Inventory chain (from character slot):
         // +{slot} -> +0xB8 -> +0x18 -> +0x08 -> {inv_offset}
@@ -437,13 +456,16 @@ namespace offsets {
         constexpr uint32_t HP_HOOK_STEP2_RVA = 0x12D09BE; // HP address capture step 2
 
         // Once captured, horse stats use same offsets as player stats:
-        // health at +0x08, stamina at +0x488, spirit at +0x518
+        // health at +0x08, stamina at +0x518, spirit at +0x5A8 in
+        // current May 2026 public tables.
+        // Older v1.01 builds used stamina +0x488 and spirit +0x518; runtime
+        // readers should validate StatEntry::TYPE and fall back as needed.
         // (relative to the captured mount stats component base)
 
         // Horse HP pointer chains (from bbfox0703 CT, v1.01.03):
         // Via Play_Base2_addr:
         //   +0x18 -> +0xA0 -> +0xD0 -> +0x68 -> +0x420 -> +0x18 -> +0x58 -> +0x8 (HP)
-        //   Same chain -> +0x488 (Stamina)
+        //   Same chain -> +0x518 (Stamina, May 2026) or +0x488 (legacy)
         // IMPORTANT: Horse pointer only resolves while mounted.
 
         // ---- Dragon Mount Resolution (from EquipHide/CrimsonDesertTools) ----
@@ -568,6 +590,19 @@ namespace offsets {
         // AOB: 0F C6 ?? 00 0F 59 ?? ?? 8B ?? 0F 11 ?? B0 01 00 00
         constexpr uint32_t ENTITY_VELOCITY    = 0x1B0;
         constexpr uint32_t VELOCITY_HOOK_RVA  = 0x2791A16;
+
+        // CD Companion (leandrodiogenes, May 2026) publishes a separate
+        // physics-delta teleport path. It is not the native fast-travel apply
+        // function, but it gives useful runtime anchors for future opt-in
+        // remote teleport support:
+        //   - static XYZ globals are resolved from a vmovsd/mov RIP pattern
+        //   - map destination capture hooks the VEX vmovsd store at +4
+        //   - physics delta hook queues target-current deltas into [r13]
+        //   - camera heading writes a signed degree float at r15+0x4A4
+        constexpr uint32_t CD_COMPANION_MAP_CAPTURE_HOOK_OFFSET = 4;
+        constexpr uint32_t CD_COMPANION_CAMERA_HEADING = 0x4A4;
+        constexpr uint32_t CD_COMPANION_PHYS_ENTITY_FORWARD_X = 0x80;
+        constexpr uint32_t CD_COMPANION_PHYS_ENTITY_FORWARD_Z = 0x88;
     }
 
     namespace World {
@@ -933,6 +968,57 @@ namespace signatures {
     constexpr const char* TELEPORT_WAYPOINT =
         "F2 41 0F 11 86 D8 00 00 00 ?? ?? ?? ?? 41 89 86 E0 00 00 00";
     constexpr int TELEPORT_WAYPOINT_OFFSET = 0;
+
+    // --- CD Companion map / physics teleport leads (leandrodiogenes, May 2026) ---
+    // Source: https://github.com/leandrodiogenes/cd-companion
+    //
+    // Entity base capture:
+    //   48 83 EC 50 48 8B F9 48 8B 91 30 11 00 00
+    // Hook after the prologue at +7, original instruction is
+    // `mov rdx, [rcx+0x1130]`; rcx is the entity base.
+    constexpr const char* CD_COMPANION_ENTITY_BASE =
+        "48 83 EC 50 48 8B F9 48 8B 91 30 11 00 00";
+    constexpr int CD_COMPANION_ENTITY_BASE_OFFSET = 7;
+
+    // Position write fallback:
+    //   movups [rcx+0x90], xmm3
+    constexpr const char* CD_COMPANION_POSITION_WRITE =
+        "0F 11 99 90 00 00 00";
+    constexpr int CD_COMPANION_POSITION_WRITE_OFFSET = 0;
+
+    // Static XYZ globals:
+    //   vmovsd [rip+disp32], xmm0
+    //   mov eax, [rsp+0x28]
+    //   mov [rip+disp32], eax
+    // First RIP target is X/Y, second is Z.
+    constexpr const char* CD_COMPANION_STATIC_XYZ =
+        "C5 FB 11 05 ?? ?? ?? ?? 8B 44 24 28 89 05 ?? ?? ?? ??";
+    constexpr int CD_COMPANION_STATIC_XYZ_OFFSET = 0;
+
+    // In-game map marker capture. Hook at +4 on the VEX vmovsd store:
+    //   vmovsd xmm0, [rdi]
+    //   vmovsd [rdx], xmm0
+    //   mov eax, [rdi+0x08]
+    //   mov [rdx+0x08], eax
+    constexpr const char* CD_COMPANION_MAP_DEST_CAPTURE =
+        "C5 FB 10 07 C5 FB 11 02 8B 47 08 89 42 08";
+    constexpr int CD_COMPANION_MAP_DEST_CAPTURE_OFFSET = 4;
+
+    // Physics delta hook used by CD Companion to apply teleports without
+    // calling the native fast-travel transition function. The hook point is
+    // confirmed by the following add/write sequence eight bytes later.
+    constexpr const char* CD_COMPANION_PHYS_DELTA =
+        "0F 28 C6 F3 45 0F 5C C8";
+    constexpr const char* CD_COMPANION_PHYS_DELTA_CONFIRM =
+        "41 0F 58 45 00 41 0F 11 45 00";
+    constexpr int CD_COMPANION_PHYS_DELTA_OFFSET = 0;
+
+    // Camera heading, signed degrees:
+    //   vmovss [r15+0x4A4], xmm2
+    //   vcomiss xmm9, xmm14
+    constexpr const char* CD_COMPANION_CAMERA_HEADING =
+        "C4 C1 7A 11 97 A4 04 00 00 C5 78 2F CE";
+    constexpr int CD_COMPANION_CAMERA_HEADING_OFFSET = 0;
 
     // --- Mount Pointer Capture (from Orcax-1399 player-status-modifier) ---
     // Function entry that takes the mount entity through a sequence of

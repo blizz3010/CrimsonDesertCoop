@@ -8,6 +8,9 @@ A co-op multiplayer mod for [Crimson Desert](https://store.steampowered.com/app/
 
 ## What's New in 0.2.3
 
+- **May 2026 stat-layout refresh** - Public bbfox CT v29 / OpenCheatTables data has stamina and spirit current values at `stats_component+0x518` and `stats_component+0x5A8` on current builds. The legacy v1.01 offsets are still kept as fallbacks, and `MountSync` now validates `StatEntry::TYPE` before choosing the current or legacy mount stamina entry.
+- **CD Companion offset leads added** - Fresh public source from [CD Companion](https://github.com/leandrodiogenes/cd-companion) exposes a separate physics-delta teleport path, static XYZ globals, in-game map-marker capture, and a camera-heading hook. These are now documented as `CD_COMPANION_*` signatures for future opt-in teleport/camera work; they do not replace the native fast-travel apply function, which is still unidentified.
+- **Mount stat read hardening** - `MountSync` now checks committed readable memory before reading HP/stamina StatEntry ranges, reducing the chance that a stale mount pointer crashes the game after dismount or patch drift.
 - **ChildActor vtable resolved at startup** - `HookManager::resolve_child_actor_vtbl()` walks three fallback EquipHide patterns (`CHILD_ACTOR_VTBL_P1/P2/P3`) using RIP-relative LEA resolution and populates the previously-orphaned `RuntimeOffsets::child_actor_vtbl`. New `is_child_actor(entity)` helper compares an entity's vtable pointer against the resolved address — single read + compare. `EnemySync` now uses it as a third filter layer (after the explicit player + hijacked-companion checks) so other companion entities, summons, and related child actors stop being mis-classified as enemies.
 - **WorldSystem probe now logs RTTI class names + vfunc fingerprints** - With `dump_world_system_probe = true`, each sibling line in `cdcoop_world_probe.log` now includes the MSVC-decorated RTTI class name (e.g. `.?AVQuestManager@pa@@`) read from the vtable's `RTTICompleteObjectLocator`, plus the first 4 vtable function RVAs. That's the behavioural fingerprint plus the human-readable class name a community submitter needs to identify which sibling is the quest / cutscene / world-object manager — in most cases they'll be readable directly from the decorated name without needing to cross-reference RVAs at all. Significantly more useful than the bare vtable RVA we logged in 0.2.2. Every dereference is bounded by `VirtualQuery` so a bad vtable just logs `(unknown)` rather than touching garbage memory.
 - **Hook correctness fixes (from 0.2.2 [#21](https://github.com/blizz3010/CrimsonDesertCoop/pull/21))** - `dragon_hp_probe` was treating `rcx` as the marker but the AOB hits a mid-function `mov [r13+0x160]` write — converted to `SafetyHookMid` and reads `ctx.r13` directly. `player_position_detour` was broadcasting garbage `y`/`z` from detour args at a mid-function site — now reads position from the verified pointer chain (same path used for rotation). Adds `is_valid_ptr` guards in the overlay and a `Mount::HP_SANITY_MAX_RAW` constant.
@@ -21,7 +24,7 @@ A co-op multiplayer mod for [Crimson Desert](https://store.steampowered.com/app/
 
 - **Fast-travel mid-hook (opt-in)** - With `sync_fast_travel = true`, `HookManager` now installs a `SafetyHookMid` at `CrimsonDesert.exe+0xAB5594` (the map-waypoint apply site documented in [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md) #7). On the host, the detour reads `[r15+0x1C..0x28]` (waypoint X/Y/Z) and `[r15+0x00]` (waypoint type id), then broadcasts a new `TELEPORT_TRIGGER` packet. The client-side apply is intentionally log-only for this release because the apply function (the one that consumes the staged target and triggers the area transition) hasn't been identified — the existing 30Hz position broadcast already pulls the companion entity along once the host arrives.
 - **First mid-function hook in the project** - `HookManager::create_mid_hook()` and the `safetyhook::Context`-based detour signature are now available for any future register-state captures (quest manager dispatch, cutscene trigger, etc.).
-- **Two new community AOBs** in `signatures::` - `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` (from Orcax-1399 player-status-modifier scanner). Documented but not yet wired into a sync path; intended as the foundation for mount HP / stamina co-op sync.
+- **Two new community AOBs** in `signatures::` - `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` (from Orcax-1399 player-status-modifier scanner). This landed the research foundation later used by 0.2.2 mount HP / stamina sync.
 - **Build cleanup** - Fixed C2027 undefined `SteamNetConnectionStatusChangedCallback_t` regression that broke Windows builds with the Steamworks SDK ([#18](https://github.com/blizz3010/CrimsonDesertCoop/pull/18)). Fixed C4456 shadowed local in the position detour.
 
 ## What's New in 0.2.0
@@ -70,12 +73,12 @@ These features are **still not fully functional in-game** and need further resea
 | Feature | Status | What's Blocking It |
 |---------|--------|--------------------|
 | Animation sync (cross-model) | Passthrough only (0.1.x behavior) + evaluator write path (experimental) | Per-model animation IDs still need PAZ extraction for true remap. The evaluator hook captures the right struct but the ID namespace differs per character model |
-| Fast-travel sync | Capture-only mid-hook (opt-in via `sync_fast_travel`) | Hook reads the host's waypoint and broadcasts `TELEPORT_TRIGGER`; receive-side is log-only because the apply function isn't identified. Position broadcast usually pulls the companion along once the host arrives |
+| Fast-travel sync | Capture-only mid-hook (opt-in via `sync_fast_travel`) | Hook reads the host's waypoint and broadcasts `TELEPORT_TRIGGER`; receive-side is log-only because the native apply function isn't identified. CD Companion's physics-delta path is documented as a possible opt-in fallback, but not wired |
 | Quest sync | Receive-side stub + candidate pointer logging | Quest manager identity is now probed - set `dump_world_system_probe=true`, reproduce progress on host, and send `cdcoop_world_probe.log` to the issue tracker |
 | Cutscene sync | Receive-side stub + candidate pointer logging | Same probe as above. Trigger function still unknown |
 | World interaction sync | Receive-side stub + candidate pointer logging | Same probe as above |
 | Dragon mount HP | Dynamically resolved at first mount (experimental) | Auto-scan picks a plausible float. Value surfaces in the debug overlay - verify against in-game HP bar and report back if wrong |
-| Mount HP / stamina sync | State broadcast + overlay (opt-in via `sync_mount_state`) | `MOUNT_PTR_CAPTURE` mid-hook captures the local mount entity, `MountSync` polls HP/stamina at 5Hz and broadcasts `MOUNT_STATE`. Both peers display each other's mount status in the session panel. Visual sync (the companion entity still hovers at mount height on the remote side because no mount entity is spawned there) is a follow-up |
+| Mount HP / stamina sync | State broadcast + overlay (opt-in via `sync_mount_state`) | `MOUNT_PTR_CAPTURE` mid-hook captures the local mount entity, `MountSync` polls HP/stamina at 5Hz and broadcasts `MOUNT_STATE`. Stamina uses the May 2026 StatEntry layout first and falls back to the legacy layout by type-id validation. Visual sync (the companion entity still hovers at mount height on the remote side because no mount entity is spawned there) is a follow-up |
 | Per-action combat flags | Evaluator `+0x6A` flag captured (experimental) | Works only when evaluator hook is enabled and a combat action is active. Actor-base `0x130 / 0x131` stay deprecated |
 | Full camera struct | Zoom/FOV only | Camera mods use PAZ XML, not runtime memory. Only `+0xD8` is mapped |
 
@@ -242,24 +245,25 @@ These are the remaining offsets/systems needed. **If you have access to any of t
 | 1 | **HIGH** | Animation IDs per model | Extract animation paths from .paac files (721 nodes in `sword_upper.paac` per CDGuardCancel research). The original [CDAnimCancel](https://github.com/faisalkindi/CDAnimCancel) repo went 404, but the same author published the successor [**CDGuardCancel**](https://github.com/faisalkindi/CDGuardCancel) with `tools/extract_paac.py` + `patch_transitions.py` and full .paac format documentation (3-layer guard block system, 622KB bytecode section). Needed for true cross-model remap | Evaluator hook exists (experimental) but the ID namespace is still same-model-only |
 | 2 | **MEDIUM** | Quest Manager | Confirm which WorldSystem sibling slot from `cdcoop_world_probe.log` is the quest manager, then identify its "set stage" entry function | Probe scaffolding landed; waiting on community log submissions |
 | 3 | **MEDIUM** | Cutscene Manager | Same probe approach; find the cutscene trigger function | Probe scaffolding landed; waiting on logs |
-| 4 | **MEDIUM** | Camera State | Map camera struct beyond zoom (`+0xD8`) - position, rotation, target | Partial (zoom only) |
+| 4 | **MEDIUM** | Camera State | Map camera struct beyond zoom (`+0xD8`) - position, rotation, target. CD Companion adds a camera-heading hook at `r15+0x4A4`, which helps rotation but not full camera position/target | Partial (zoom + heading lead) |
 | 5 | **MEDIUM** | Dragon HP verification | Read `[dragon_mount+0xD8]` in-game and confirm it tracks the HP bar. Strong candidate from the dragon-mount field map at `CrimsonDesert.exe+0x339D8CB` (see [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md)). Integrated as `Mount::DRAGON_HP_PREFERRED_OFFSET` | **Candidate known**, needs field read-back |
 | 6 | **LOW** | World Objects | Confirm WorldSystem sibling for doors / chests / interactive world objects | Probe candidate stored but not yet mapped to a dispatch function |
-| 7 | **LOW** | Teleport apply function | The capture mid-hook at `+0xAB5594` is **landed** (0.2.1, gated on `sync_fast_travel`) and broadcasts `TELEPORT_TRIGGER`. What's still missing is the apply/transition function — the one that consumes `[r14+0xD8] / [r14+0xE0]` and triggers a real area transition. Once that's identified, the receive-side stub in `WorldSync::on_remote_teleport()` can call it directly | **Capture landed**, apply path unknown |
+| 7 | **LOW** | Teleport apply function | The native capture mid-hook at `+0xAB5594` is **landed** (0.2.1, gated on `sync_fast_travel`) and broadcasts `TELEPORT_TRIGGER`. CD Companion now provides a separate physics-delta teleport path (`CD_COMPANION_PHYS_DELTA`) that can be tested as an opt-in receiver apply fallback. The native area-transition function that consumes `[r14+0xD8] / [r14+0xE0]` is still unknown | Native capture landed; physics fallback lead documented |
 | 8 | **LOW** | Combat Flag verification | The evaluator `+0x6A` flag from CDAnimCancel now writes when experimental hooks are enabled - confirm it actually gates co-op combat state the way we want | New hook needs field testing |
 | 9 | **LOW** | Mount visual sync | **0.2.2 landed mount state sync** via the `MOUNT_PTR_CAPTURE` mid-hook + `MOUNT_STATE` packet + `MountSync`. What's still missing is visual parity: the companion entity appears to hover at mount height on the remote side because no mount entity is spawned for it. A full fix needs the mount-spawn function (unknown). An intermediate fix could piggyback on the companion's own native mount when it spawns during single-player |
-| 10 | **LOW** | `MOUNT_STAMINA_ACCESS` hook | The AOB is in `signatures::` but we're reading stamina through the standard StatEntry pattern instead. This hook would let us verify our stamina read path against the game's own or intercept stamina writes directly | Signature known, using alternate read path |
+| 10 | **LOW** | `MOUNT_STAMINA_ACCESS` hook | The AOB is in `signatures::` and Orcax's AB00 notes still make it useful for direct write/intercept experiments. It is no longer a blocker for overlay/network mount stamina because `MountSync` reads validated StatEntry data with current and legacy layout fallback | Signature known, not needed for current sync path |
 
 #### Where to Look
 
 - **Animation**: The animation system uses **.paac action chart files**, not simple actor struct fields. The original CDAnimCancel repo went 404; the successor [CDGuardCancel](https://github.com/faisalkindi/CDGuardCancel) (same author) re-publishes the `extract_paac.py` parser + `patch_transitions.py` + full .paac format documentation, and confirms the evaluator function at `CrimsonDesert.exe+2712090` (AOB: `0F 28 CE 48 89 4C 24 20 48 8B CB E8`). [CrimsonForge](https://www.nexusmods.com/crimsondesert/mods/446) can extract .paa animation files from PAZ
 - **Quest/Cutscene**: WorldSystem (+0x30 = ActorManager) likely has sibling pointers to other managers. Scan +0x38, +0x40, +0x48 etc. [NattKh Save Editor](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR) has 633 quests / 5,450 missions for validation. CDAnimCancel found InputBlock RTTI at `0x144AFCC70` handles "menu/cutscene blocking" - possible lead
+- **Teleport**: [CD Companion](https://github.com/leandrodiogenes/cd-companion) uses a physics-delta hook rather than the native fast-travel transition. Its public source gives the current static XYZ, map marker, physics delta, and camera heading patterns. Porting that path should be a separate opt-in apply mode because it bypasses the game's native area-transition flow.
 - **Dragon HP**: Confirmed float type. 2026-04-18 research pass located the full mount struct field map at the dragon-timer injection point (`+0x339D8CB`) and identified `+0xD8` as the strongest HP candidate (only standalone float in the stat cluster, written with xmm8). Needs in-game read-back — see [`docs/RESEARCH_2026-04-18.md`](docs/RESEARCH_2026-04-18.md) #5
 - **Camera**: [UltimateCameraMod](https://github.com/FitzDegenhub/UltimateCameraMod) has 150+ camera states in `playercamerapreset.xml`. Try ReClass on the camera struct pointer (captured via r12 in zoom hook)
 
 ### Resources (Bot-Protected / Auth-Gated)
 
-These pages require manual human access (403 for automated tools). **If you can access them, the offset data inside would be valuable:**
+Some of these pages require manual human access (403 for automated tools). **If you can access any gated source, the offset data inside would be valuable:**
 
 | Resource | What It Likely Contains | Priority |
 |----------|------------------------|----------|
@@ -267,7 +271,8 @@ These pages require manual human access (403 for automated tools). **If you can 
 | [Nexus Mods Cheat Table v1.0.6](https://www.nexusmods.com/crimsondesert/mods/64) | Pointer chains (partially extracted from [GitHub mirror](https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables)) | MEDIUM |
 | [Nexus Mods Modding Guide v4.0](https://www.nexusmods.com/crimsondesert/mods/366) | BlackSpace engine internals (updated April 2026) | MEDIUM |
 | [CDCamera source/patches](https://www.nexusmods.com/crimsondesert/mods/65) | Camera field mappings (distance, height, FOV, steadycam) | MEDIUM |
-| [OpenCheatTables Thread](https://opencheattables.com/viewtopic.php?p=4863) | Alternative pointer paths, dragon HP progress | LOW |
+| [OpenCheatTables Thread](https://opencheattables.com/viewtopic.php?t=1836) | bbfox CT discussion and refreshed stat offsets; currently mirrored into docs where accessible | LOW |
+| [CD Companion source](https://github.com/leandrodiogenes/cd-companion) | Physics-delta teleport, static XYZ globals, map marker capture, camera heading hook | LOW |
 
 ### What's Already Working (Verified Offsets)
 
@@ -275,7 +280,7 @@ These pages require manual human access (403 for automated tools). **If you can 
 |----------|--------|-------------|
 | **Player Entity** | Verified | WorldSystem -> ActorManager -> UserActor chain, 3 fallback sigs |
 | **Position** | Verified | actor->+0x40->+0x08->core->+0x248->struct->+0x90 (float32 X/Y/Z) |
-| **Health/Stamina/Spirit** | Verified | StatEntry 16-byte struct via stats component at +0x58 (int64, value*1000) |
+| **Health/Stamina/Spirit** | Verified | StatEntry 16-byte struct via stats component at +0x58 (int64, value*1000). Current public bbfox CT v29 layout uses stamina/spirit at +0x518 / +0x5A8; legacy +0x488 / +0x518 retained as fallback |
 | **Rotation** | Verified | Quaternion at position_struct+0xA0, synced at 30Hz |
 | **Companion System** | Verified | Body slots +0xD0 through +0x108, AI controller at +0x48 |
 | **Damage Tracking** | Verified | Damage slot and value capture via dedicated hooks |
@@ -294,7 +299,7 @@ These pages require manual human access (403 for automated tools). **If you can 
 | **Dragon Timer** | Verified | r13+0x160 float, AOB integrated |
 | **Mount HP (Horse)** | Verified | Dynamic capture via hook steps (pointer only resolves while mounted) |
 | **Fast-Travel Capture** | Implemented (opt-in) | `SafetyHookMid` at `+0xAB5594` reads `[r15+0x1C..0x28]`; host broadcasts `TELEPORT_TRIGGER` |
-| **Mount HP / Stamina Sync** | Implemented (opt-in) | `MOUNT_PTR_CAPTURE` mid-hook + `MountSync` polls at 5Hz, broadcasts `MOUNT_STATE`; overlay shows peer's bars |
+| **Mount HP / Stamina Sync** | Implemented (opt-in) | `MOUNT_PTR_CAPTURE` mid-hook + `MountSync` polls at 5Hz, broadcasts `MOUNT_STATE`; overlay shows peer's bars. Stamina read path validates current-vs-legacy StatEntry layout |
 | **DX12 Present** | Implemented | Hook for ImGui overlay and frame tick |
 | **Steam P2P** | Implemented | ISteamNetworkingSockets with reliable/unreliable channels |
 | **40+ AOB Signatures** | Verified | Primary/fallback patterns from community mods |
@@ -306,7 +311,8 @@ These pages require manual human access (403 for automated tools). **If you can 
 - [JustSkip](https://github.com/wealdly/JustSkip) - Combat state flag AOB and RIP-relative resolver
 - [CrimsonDesertTools](https://github.com/tkhquang/CrimsonDesertTools) - WorldSystem, actor structure, equipment visibility
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework used by CD mods
-- [bbfox0703 Cheat Tables](https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables) - 220+ entry open-source CT with reputation, friendship, durability
+- [bbfox0703 Cheat Tables](https://github.com/bbfox0703/Mydev-Cheat-Engine-Tables) - 220+ entry open-source CT with reputation, friendship, durability, and the May 2026 stamina/spirit layout refresh
+- [CD Companion](https://github.com/leandrodiogenes/cd-companion) - Real-time map overlay with source for static XYZ, map marker, camera heading, and physics-delta teleport hooks
 - [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpacker) - PAZ archive extraction tool
 - [pycrimson](https://github.com/LukeFZ/pycrimson) - Python PAZ/save decrypt library
 - [UltimateCameraMod](https://github.com/FitzDegenhub/UltimateCameraMod) - 150+ camera states in PAZ XML
@@ -323,7 +329,7 @@ These pages require manual human access (403 for automated tools). **If you can 
 - **DRM**: Denuvo Anti-Tamper (no kernel-level anti-cheat)
 - **Graphics API**: DirectX 12
 - **Architecture**: x64 Windows
-- **Game Version**: v1.01.03 (March 2026)
+- **Game Version**: May 2026 public offset refresh, with v1.01.03 legacy fallback notes
 
 ### Networking Protocol
 

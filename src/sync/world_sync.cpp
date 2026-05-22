@@ -137,12 +137,13 @@ void WorldSync::on_remote_teleport(const uint8_t* data, size_t size) {
     if (size < sizeof(TeleportPacket)) return;
     auto* pkt = reinterpret_cast<const TeleportPacket*>(data);
 
-    // Apply path is intentionally log-only for now. The proper apply
+    // Apply path is intentionally log-only for now. The proper native apply
     // function (the one that consumes [r14+0xD8] / [r14+0xE0] and produces
-    // a real area transition) is unidentified. The 30Hz position broadcast
-    // already pulls the client-controlled companion entity along once the
-    // host arrives, so this notification is informational while we look
-    // for the apply function. See docs/RESEARCH_2026-04-18.md #7.
+    // a real area transition) is unidentified. CD Companion's public
+    // physics-delta teleport path is documented as a future opt-in fallback,
+    // but not wired here because it bypasses the game's native transition.
+    // The 30Hz position broadcast already pulls the client-controlled
+    // companion entity along once the host arrives. See docs/RESEARCH_2026-04-18.md #7.
     spdlog::info("Host fast-travel announced: type=0x{:X} dest=({},{},{}) — apply pending",
                  pkt->waypoint_type, pkt->destination.x, pkt->destination.y, pkt->destination.z);
 }

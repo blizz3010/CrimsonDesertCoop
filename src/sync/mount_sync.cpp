@@ -6,8 +6,49 @@
 #include <spdlog/spdlog.h>
 #include <Windows.h>
 #include <cmath>
+#include <cstddef>
+#include <initializer_list>
 
 namespace cdcoop {
+
+namespace {
+
+bool is_readable_range(uintptr_t addr, size_t size) {
+    if (!is_valid_ptr(addr) || size == 0) return false;
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(reinterpret_cast<const void*>(addr), &mbi, sizeof(mbi)) == 0) {
+        return false;
+    }
+    if (!(mbi.State & MEM_COMMIT) || (mbi.Protect & PAGE_NOACCESS) ||
+        (mbi.Protect & PAGE_GUARD)) {
+        return false;
+    }
+
+    const uintptr_t end = addr + size;
+    const uintptr_t region_end =
+        reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    return end >= addr && end <= region_end;
+}
+
+uintptr_t resolve_stat_entry(uintptr_t health_entry, int32_t expected_type,
+                             std::initializer_list<uint32_t> entry_offsets) {
+    if (!is_valid_ptr(health_entry)) return 0;
+    constexpr size_t kStatEntryReadSize =
+        static_cast<size_t>(StatEntry::MAX_VALUE) + sizeof(int64_t);
+
+    for (uint32_t entry_offset : entry_offsets) {
+        uintptr_t entry = health_entry + entry_offset;
+        if (!is_readable_range(entry, kStatEntryReadSize)) continue;
+        if (read_mem<int32_t>(entry, StatEntry::TYPE) == expected_type) {
+            return entry;
+        }
+    }
+
+    return 0;
+}
+
+} // namespace
 
 MountSync& MountSync::instance() {
     static MountSync inst;
@@ -84,13 +125,29 @@ bool MountSync::poll_local_mount(MountView& out) {
     // HP is the first stat entry (same layout as player):
     // stat_component + 0x08 = current_value (int64, value*1000)
     // stat_component + 0x18 = max_value
+    constexpr size_t kStatEntryReadSize =
+        static_cast<size_t>(StatEntry::MAX_VALUE) + sizeof(int64_t);
+    if (!is_readable_range(stat_base, kStatEntryReadSize)) {
+        out.is_mounted = false;
+        return false;
+    }
+
     int64_t cur_hp = read_mem<int64_t>(stat_base, StatEntry::CURRENT_VALUE);
     int64_t max_hp = read_mem<int64_t>(stat_base, StatEntry::MAX_VALUE);
 
-    // Stamina lives at the player-side offset (+0x488 from stat_base)
-    // for both player and mount in the Orcax scanner's layout.
-    int64_t cur_st = read_mem<int64_t>(stat_base, StatEntry::STAMINA_FROM_HEALTH + StatEntry::CURRENT_VALUE);
-    int64_t max_st = read_mem<int64_t>(stat_base, StatEntry::STAMINA_FROM_HEALTH + StatEntry::MAX_VALUE);
+    // Stamina moved from health_entry+0x480 to +0x510 in bbfox CT v29.
+    // Validate the StatEntry type so current and legacy layouts both work.
+    uintptr_t stamina_entry = resolve_stat_entry(stat_base, StatEntry::STAMINA_ID, {
+        StatEntry::STAMINA_FROM_HEALTH,
+        StatEntry::LEGACY_STAMINA_FROM_HEALTH
+    });
+
+    int64_t cur_st = 0;
+    int64_t max_st = 0;
+    if (stamina_entry != 0) {
+        cur_st = read_mem<int64_t>(stamina_entry, StatEntry::CURRENT_VALUE);
+        max_st = read_mem<int64_t>(stamina_entry, StatEntry::MAX_VALUE);
+    }
 
     // Sanity: if HP is zero or nonsense, treat as dismounted.
     if (max_hp <= 0 || max_hp > offsets::Mount::HP_SANITY_MAX_RAW) {

@@ -2,13 +2,13 @@
 
 This document explains how to find the memory offsets and function signatures needed for the co-op mod. Many offsets are already verified and integrated - see the **Current Status** section below for what's done and what still needs work.
 
-## Current Status (April 2026, Game v1.01.03)
+## Current Status (May 2026 public tables / legacy v1.01 fallback)
 
 | Category | Status | Details |
 |----------|--------|---------|
 | Player entity / WorldSystem chain | **Verified** | 3 fallback sigs, static base pointer, dynamic resolution |
 | Position (authoritative) | **Verified** | actor->+0x40->+0x08->core->+0x248->struct->+0x90 (float32) |
-| Health / Stamina / Spirit | **Verified** | StatEntry at +0x58, int64 (value*1000) |
+| Health / Stamina / Spirit | **Verified** | StatEntry at +0x58, int64 (value*1000). bbfox CT v29 uses stamina/spirit current at +0x518 / +0x5A8; legacy v1.01 layout kept as fallback |
 | Rotation | **Verified** | Quaternion at position_struct+0xA0 |
 | Companion / body slots | **Verified** | +0xD0 through +0x108 (8 slots), AI controller at +0x48 |
 | Damage tracking | **Verified** | Damage slot hook with source/amount capture |
@@ -16,7 +16,7 @@ This document explains how to find the memory offsets and function signatures ne
 | Inventory / items | **Verified** | Full item struct, inventory chain from character slot |
 | Reputation | **Verified** | Gain setter at +1B4C98E, no-decrease at +1B4C971 |
 | Resistance attributes | **Verified** | Injection at +12D1DFC, stride 0x20 |
-| Camera zoom/FOV | **Verified** | +0xD8 via r12 capture |
+| Camera zoom/FOV | **Verified** | +0xD8 via r12 capture; CD Companion adds a camera-heading hook at r15+0x4A4 |
 | Dragon timer | **Verified** | r13+0x160 float |
 | Mount HP (horse) | **Verified** | Dynamic capture (pointer only valid while mounted) |
 | 40+ AOB signatures | **Verified** | Primary/fallback patterns |
@@ -27,8 +27,8 @@ This document explains how to find the memory offsets and function signatures ne
 | Full camera struct | **Missing** | Only zoom at +0xD8; rest is PAZ XML-controlled |
 | Dragon HP | **Candidate known** | `+0xD8` in dragon-mount struct (strong float candidate from field map); needs in-game read-back |
 | World object manager | **Missing** | MapLookup/MapInsert sigs exist but manager unknown |
-| Teleport / fast-travel (capture) | **Hook landed** (0.2.1) | `SafetyHookMid` at `+0xAB5594`, opt-in via `sync_fast_travel`. Host broadcasts `TELEPORT_TRIGGER`; client apply path still log-only |
-| Mount pointer / stamina | **AOBs added** (0.2.1) | `MOUNT_PTR_CAPTURE` and `MOUNT_STAMINA_ACCESS` constants from Orcax. No detour wired yet |
+| Teleport / fast-travel (capture) | **Hook landed** (0.2.1) | `SafetyHookMid` at `+0xAB5594`, opt-in via `sync_fast_travel`. Host broadcasts `TELEPORT_TRIGGER`; native apply path still log-only; CD Companion physics-delta fallback is documented but not wired |
+| Mount pointer / stamina | **Implemented / documented** | `MOUNT_PTR_CAPTURE` is wired for mount entity capture. `MOUNT_STAMINA_ACCESS` remains documented as a direct AB00 hook, but current sync reads validated StatEntry data instead |
 
 ## Prerequisites
 
@@ -83,10 +83,16 @@ Player Core -> Position:
 Stats Component (+0x58):
 +0x08  int64    Health current (value * 1000) (VERIFIED)
 +0x18  int64    Health max (VERIFIED)
-+0x488 int64    Stamina current (VERIFIED)
-+0x498 int64    Stamina max (VERIFIED)
-+0x518 int64    Spirit current (VERIFIED)
-+0x528 int64    Spirit max (VERIFIED)
++0x518 int64    Stamina current (VERIFIED, May 2026 / bbfox CT v29)
++0x528 int64    Stamina max (VERIFIED, May 2026 / bbfox CT v29)
++0x5A8 int64    Spirit current (VERIFIED, May 2026 / bbfox CT v29)
++0x5B8 int64    Spirit max (VERIFIED, May 2026 / bbfox CT v29)
+
+Legacy v1.01 layout kept as fallback:
++0x488 int64    Stamina current
++0x498 int64    Stamina max
++0x518 int64    Spirit current
++0x528 int64    Spirit max
 
 Animation (ESTIMATED - likely incorrect approach):
 +0x120 uint32   Animation state ID (estimated, but CDAnimCancel research shows
@@ -166,6 +172,7 @@ because they may unlock specific co-op features when needed:
 | `MAP_LOOKUP_P1` / `MAP_INSERT_P1` | Generic map dictionary primitives (from EquipHide) | Could be the foundation for a generic key-value sync (e.g. world flags, quest state) once the manager identity is known |
 | `PART_INOUT_P1` / `PART_INOUT_P2` | Companion / equipment visibility transitions | Auto-trigger `CompanionHijack::activate()` when a companion becomes visible, removing the manual `spawn_remote_player()` step |
 | `HP_CAPTURE_STEP1` / `HP_CAPTURE_STEP2` | Alternative path to player + horse HP base capture (from bbfox CT) | Cross-verification of our existing player HP read; could also resolve mount HP without depending on the Orcax `MOUNT_PTR_CAPTURE` |
+| `CD_COMPANION_*` | Static XYZ globals, map marker capture, physics-delta teleport, camera heading (from CD Companion) | Candidate opt-in receiver-side teleport fallback and camera heading source; not wired because it is a separate physics injection path, not the native fast-travel transition |
 | `DURABILITY_WRITE_PRIMARY` / `_FALLBACK` | Gear durability writes (from Orcax) | Co-op gear durability sync if both players want shared damage/repair |
 | `REPUTATION_SET_MIN` / `REPUTATION_NO_DEC` | Reputation gain setters (from bbfox CT) | Single-player progression — not co-op-relevant |
 | `CONTRIBUTION_GAIN` / `_MAP`, `TRUST_GIFT` / `_SHOP`, `INVENTORY_SLOT_READ` | Single-player progression hooks | Not co-op-relevant |
@@ -222,7 +229,7 @@ The [crimson-desert-unpacker](https://github.com/lazorr410/crimson-desert-unpack
 - ChaCha20 with Jenkins hashlittle key derivation (init `0xC5EDE`)
 - 32-byte key: 8 chunks of `(seed ^ 0x60616263) ^ delta[i]`
 
-## Known Offsets and Signatures (April 2026)
+## Known Offsets and Signatures (April/May 2026)
 
 The following offsets and signatures have been sourced from the active modding community. All are integrated in `include/cdcoop/core/game_structures.h`.
 
@@ -257,14 +264,16 @@ actor -> +0x40 -> +0x08 -> player_core -> +0x248 -> position_struct -> +0x90
 **Hook-time direct access** (via PositionHeightAccess sig):
 - r13 = float* pointing directly at the position vector
 
-### Static Player Base Pointer (from bbfox0703 CT, v1.01.03)
+### Static Player Base Pointer (from bbfox0703 CT, v1.01.03 legacy)
 ```
 Player = CrimsonDesert.exe+5CC7618
 ```
 Chain: `[base+0x18] -> +0xA0 -> +0xD0 -> {character_slot} -> +0x20 -> +0x18 -> +0x58 -> {stat}`
 
 ### Stamina/Spirit Offset Note
-The Orcax player-status-modifier source defines `kStaminaEntryOffsetFromHealth = 0x480` and `kSpiritEntryOffsetFromHealth = 0x510`. Our code uses `+0x488` and `+0x518` from the stats component base. The 8-byte difference is because Orcax measures from the health entry pointer (root+0x58+0x08 = the current value field), while our offsets measure from the stats component root (root+0x58). Both are correct in their respective reference frames.
+The May 2026 bbfox CT v29 / OpenCheatTables layout moved the active stamina and spirit current values to `stats_component+0x518` and `stats_component+0x5A8`. That means their entry starts are `health_entry+0x510` and `health_entry+0x5A0`.
+
+The Orcax player-status-modifier source still defines the older `kStaminaEntryOffsetFromHealth = 0x480` and `kSpiritEntryOffsetFromHealth = 0x510`, which correspond to `stats_component+0x488` and `stats_component+0x518` after adding the `+0x08` current-value field. Runtime readers now try the current layout first, validate `StatEntry::TYPE`, and fall back to the legacy layout for older game builds.
 
 ### Reputation System (from bbfox0703 CT, v1.01.03)
 Fully integrated in `game_structures.h`:
@@ -343,11 +352,28 @@ Integrated as `namespace Teleport` in `include/cdcoop/core/game_structures.h`.
 
 **0.2.1 update**: capture mid-hook is now installed (opt-in via `sync_fast_travel`). Host detour at `+0xAB5594` reads `[r15+0x00]` (waypoint type), `[r15+0x1C..0x28]` (X/Y/Z), and broadcasts `TELEPORT_TRIGGER`. Receive-side is intentionally log-only — the apply / area-transition function isn't identified yet. The 30Hz position broadcast pulls the companion entity along once the host arrives.
 
+### CD Companion map / physics teleport leads (leandrodiogenes, May 2026)
+
+CD Companion is a public real-time map overlay that reads Crimson Desert
+position data and teleports through a physics-delta hook instead of calling
+the game's native fast-travel apply function. These are integrated as
+`signatures::CD_COMPANION_*` scaffolding:
+
+- **Entity base capture**: `48 83 EC 50 48 8B F9 48 8B 91 30 11 00 00`, hook offset `+7`; original instruction reads `[rcx+0x1130]` and `rcx` is the entity base.
+- **Static XYZ globals**: `C5 FB 11 05 ?? ?? ?? ?? 8B 44 24 28 89 05 ?? ?? ?? ??`; first RIP target is X/Y, second is Z.
+- **Map destination capture**: `C5 FB 10 07 C5 FB 11 02 8B 47 08 89 42 08`, hook offset `+4`, captures in-game map marker X/Y/Z.
+- **Physics delta hook**: `0F 28 C6 F3 45 0F 5C C8`, confirmed by `41 0F 58 45 00 41 0F 11 45 00` eight bytes later. CD Companion queues `target - current` into this path to move the player.
+- **Camera heading hook**: `C4 C1 7A 11 97 A4 04 00 00 C5 78 2F CE`; writes signed camera degrees to `r15+0x4A4`.
+
+This is useful, but it is not the same as the native area-transition apply
+function. Treat it as a future opt-in receiver-side fallback, not as a drop-in
+replacement for `WorldSync::on_remote_teleport()`.
+
 ### Mount pointer / stamina (Orcax-1399 player-status-modifier scanner, 2026-04-18 research pass)
 - **Mount pointer capture**: `48 8B C7 49 8B 7D 08 80 BF 94 00 00 00 00 0F 85 ?? ?? ?? ?? 48 8B 47 68 48 8B 48 20 48 83 C1 30 E8 ?? ?? ?? ?? 66 83 B8 E4 00 00 00 00` (offset 20). Function entry that walks the mount pointer chain ending at `+0x30`. Useful as an alternative to the static-base + chain resolution we currently use.
 - **Mount stamina ("AB00") access**: `0F B7 D7 49 8B CE E8 ?? ?? ?? ?? 48 8B F0 48 85 DB 74 ?? 33 C0 66 89 44 24 20 38 46 53` (offset 11). Hook site that reads/writes the mount stamina stat.
 
-Both added as `signatures::MOUNT_PTR_CAPTURE` and `signatures::MOUNT_STAMINA_ACCESS` in 0.2.1. No detour wired yet; pending decision on whether co-op should share mount HP / stamina.
+Both were added as `signatures::MOUNT_PTR_CAPTURE` and `signatures::MOUNT_STAMINA_ACCESS` in 0.2.1. `MOUNT_PTR_CAPTURE` is now wired by `MountSync`; `MOUNT_STAMINA_ACCESS` remains available for a future direct stamina hook, but the current overlay/network path polls StatEntry data and validates current-vs-legacy layouts by type id.
 
 ### Other Orcax-1399 AOBs (not yet integrated, listed for completeness)
 The Orcax scanner.cpp also publishes AOBs we don't currently need but are documented here in case a future mod wants them: dragon village-summon jump, dragon flying-restrict write, dragon roof-restrict test, affinity gain prepare / current write, abyss-gear durability delta, spirit signed-delta, item gain write. See [Orcax-1399/CrimsonDesert-player-status-modifier scanner.cpp](https://github.com/Orcax-1399/CrimsonDesert-player-status-modifier/blob/master/src/scanner.cpp).
@@ -379,7 +405,9 @@ the visible HP bar.
 - [DetourModKit](https://github.com/tkhquang/DetourModKit) - AOB scanning framework
 - [CrimsonDesertModdingResearch](https://github.com/marvelmaster/CrimsonDesertModdingResearch) - Address value table
 - [JustSkip](https://github.com/wealdly/JustSkip) - Combat state flag, cutscene skip hooks
+- [CD Companion](https://github.com/leandrodiogenes/cd-companion) - Static XYZ, map marker, camera heading, physics-delta teleport hooks
 - [Nexus Mods - Crimson Desert](https://www.nexusmods.com/crimsondesert) - 256+ mods
+- [OpenCheatTables Crimson Desert thread](https://opencheattables.com/viewtopic.php?t=1836) - bbfox CT discussion and public stat-layout updates
 - [FearLess CE Thread](https://fearlessrevolution.com/viewtopic.php?t=38679) - Active offset research (16+ pages)
 
 ## Game Version Tracking
@@ -390,6 +418,7 @@ Offsets WILL change with game patches. Maintain a version table:
 |-------------|-------------|-----------|-----------------|-------|
 | 1.00.02     | Verified    | Verified  | Verified        | Launch version |
 | 1.00.03     | Verified    | Verified  | Verified        | March 25 patch |
-| 1.01.03     | Verified    | Verified  | Verified        | March hotfix (current) |
+| 1.01.03     | Verified    | Verified  | Verified        | March hotfix, legacy stat spacing |
+| May 2026 public tables | Unchanged in public sources | Verified via bbfox CT v29 | Unchanged in public sources | Stamina/spirit entry deltas moved to +0x510 / +0x5A0 from health entry |
 
 Use the signature scanner to automatically find updated offsets after patches rather than hardcoding addresses.
