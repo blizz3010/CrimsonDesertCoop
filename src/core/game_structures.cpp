@@ -10,11 +10,48 @@ RuntimeOffsets& get_runtime_offsets() {
     return offsets;
 }
 
+bool is_readable(uintptr_t addr, size_t size) {
+    if (size == 0 || !is_valid_ptr(addr)) return false;
+    // Reject wrap-around (addr + size overflowing past the address space).
+    if (addr + size < addr) return false;
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(reinterpret_cast<const void*>(addr), &mbi, sizeof(mbi)) == 0)
+        return false;
+    if (!(mbi.State & MEM_COMMIT)) return false;
+
+    // A guard page faults on first touch just like NOACCESS, so treat both as
+    // unreadable. Then require one of the read-permitting protections — this
+    // rejects PAGE_NOACCESS and execute-only pages that grant no read access.
+    if (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) return false;
+    constexpr DWORD kReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                                PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                                PAGE_EXECUTE_WRITECOPY;
+    if (!(mbi.Protect & kReadable)) return false;
+
+    // The whole span must stay inside this one committed region; a read that
+    // straddles into an adjacent unmapped region would still fault.
+    uintptr_t region_end =
+        reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    return addr + size <= region_end;
+}
+
+uintptr_t safe_read_ptr(uintptr_t addr) {
+    if (!is_readable(addr, sizeof(uintptr_t))) return 0;
+    return *reinterpret_cast<uintptr_t*>(addr);
+}
+
 uintptr_t resolve_ptr_chain(uintptr_t base, std::initializer_list<uint32_t> offsets) {
     uintptr_t addr = base;
     for (auto offset : offsets) {
-        if (addr == 0) return 0;
-        auto next = *reinterpret_cast<uintptr_t*>(addr + offset);
+        // Guard the read itself: is_valid_ptr only bounds the numeric range,
+        // so a stale chain (e.g. after a game patch changed offsets) can point
+        // a range-valid address at unmapped memory. Dereferencing it would
+        // fault and take the whole game process down — the crash reported in
+        // issue #49. safe_read_ptr returns 0 for any address that isn't backed
+        // by committed, readable memory, so a broken chain degrades to a null
+        // result instead of a crash.
+        uintptr_t next = safe_read_ptr(addr + offset);
         if (!is_valid_ptr(next)) return 0;
         addr = next;
     }

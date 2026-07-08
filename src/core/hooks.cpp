@@ -412,15 +412,17 @@ bool HookManager::resolve_world_system() {
         uintptr_t rip_addr = result.address + rip_offset;
         rt.world_system_ptr = MemoryScanner::follow_rel32(rip_addr, 0);
 
-        if (is_valid_ptr(rt.world_system_ptr)) {
-            // Dereference to get actual WorldSystem pointer
-            uintptr_t ws = *reinterpret_cast<uintptr_t*>(rt.world_system_ptr);
-            if (is_valid_ptr(ws)) {
-                rt.world_system_ptr = ws;
-                rt.world_system_resolved = true;
-                spdlog::info("WorldSystem resolved at 0x{:X}", rt.world_system_ptr);
-                return resolve_player_actor();
-            }
+        // Dereference to get the actual WorldSystem pointer. safe_read_ptr
+        // returns 0 if the resolved storage address isn't backed by committed
+        // memory — after a game patch a stale signature can resolve to an
+        // address that passes the numeric range check but is unmapped, and a
+        // bare deref there would crash the game (issue #49).
+        uintptr_t ws = safe_read_ptr(rt.world_system_ptr);
+        if (is_valid_ptr(ws)) {
+            rt.world_system_ptr = ws;
+            rt.world_system_resolved = true;
+            spdlog::info("WorldSystem resolved at 0x{:X}", rt.world_system_ptr);
+            return resolve_player_actor();
         }
         spdlog::warn("WorldSystem pointer invalid from {}", name);
         return false;
@@ -495,8 +497,9 @@ bool HookManager::resolve_player_base() {
         uintptr_t rip_addr = result.address + signatures::PLAYER_BASE_DISCOVERY_RIP_OFFSET;
         uintptr_t player_base_storage = MemoryScanner::follow_rel32(rip_addr, 0);
 
-        if (is_valid_ptr(player_base_storage)) {
-            uintptr_t player_base = *reinterpret_cast<uintptr_t*>(player_base_storage);
+        {
+            // Crash-safe read of the resolved storage slot (see issue #49).
+            uintptr_t player_base = safe_read_ptr(player_base_storage);
             if (is_valid_ptr(player_base)) {
                 // Follow the chain to find the player actor:
                 // base -> +0x18 -> +0xA0 -> +0xD0 -> +0x68 (Kliff)
@@ -521,8 +524,14 @@ bool HookManager::resolve_player_base() {
     }
 
     // Method 2: Hardcoded static base (last resort, v1.01.03)
+    // STATIC_RVA is relative to the March-2026 image; after a later patch the
+    // image size can shrink below it, so game_base_ + STATIC_RVA may land past
+    // the mapped module. safe_read_ptr checks the page is committed before
+    // dereferencing — a bare read here is what crashed the game on the July
+    // 2026 update (issue #49) once the signature-based methods above stopped
+    // matching.
     uintptr_t static_base = game_base_ + offsets::PlayerBase::STATIC_RVA;
-    uintptr_t player_base = *reinterpret_cast<uintptr_t*>(static_base);
+    uintptr_t player_base = safe_read_ptr(static_base);
     if (is_valid_ptr(player_base)) {
         uintptr_t actor = resolve_ptr_chain(player_base, {
             offsets::PlayerBase::CHAIN_0,

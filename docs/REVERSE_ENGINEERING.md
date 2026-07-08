@@ -420,5 +420,21 @@ Offsets WILL change with game patches. Maintain a version table:
 | 1.00.03     | Verified    | Verified  | Verified        | March 25 patch |
 | 1.01.03     | Verified    | Verified  | Verified        | March hotfix, legacy stat spacing |
 | May 2026 public tables | Unchanged in public sources | Verified via bbfox CT v29 | Unchanged in public sources | Stamina/spirit entry deltas moved to +0x510 / +0x5A0 from health entry |
+| July 4 2026 patch | Broken | Broken | Broken | Offsets shifted; all WorldSystem patterns + PlayerPointerCapture fail (issue #49). Needs re-scan against the new build. Mod now stays inert instead of crashing the game. |
 
 Use the signature scanner to automatically find updated offsets after patches rather than hardcoding addresses.
+
+### Fail-safe behavior when signatures don't match
+
+Resolution must never take the game process down when it runs on a build it
+doesn't recognise. Every raw dereference on the resolution path — the
+`resolve_ptr_chain` walker, the WorldSystem singleton read, and the
+signature/static-base player reads in `HookManager::resolve_player_base` —
+goes through `safe_read_ptr` / `is_readable` (VirtualQuery-backed committed +
+readable checks), not a bare `*ptr`. `is_valid_ptr` only bounds the numeric
+range; after a patch a stale signature or static RVA can resolve to a
+range-valid but unmapped address, and dereferencing it faults the whole game.
+With the guards, a broken chain degrades to a null result: the mod logs the
+failure (visible in the overlay's hook status) and loads inert, so the game
+still boots and the save still loads. Keep this invariant when adding new
+offset chains — validate reachability before you dereference.

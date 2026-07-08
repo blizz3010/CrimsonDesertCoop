@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <array>
 #include <string>
 
@@ -1110,6 +1111,22 @@ inline bool is_valid_ptr(uintptr_t addr) {
     return addr >= kMinimumPointerAddress &&
            addr <= kMaximumUserPointerAddress;
 }
+
+// Whether [addr, addr+size) lies entirely in committed, readable memory.
+// is_valid_ptr only bounds the numeric range; this additionally asks the OS
+// (VirtualQuery) whether the page is actually mapped and readable. Use it
+// before dereferencing an address that could be stale — e.g. a signature
+// result or a pointer-chain hop after a game patch shifted the layout.
+// Costs one VirtualQuery, so it belongs on one-shot resolution / low-rate
+// polling paths, NOT inside per-write hot loops (read_mem stays range-only
+// for that reason).
+bool is_readable(uintptr_t addr, size_t size);
+
+// Read a pointer-sized value at `addr`, returning 0 if `addr` is out of
+// range or not backed by committed, readable memory. This is the crash-safe
+// replacement for a bare `*reinterpret_cast<uintptr_t*>(addr)` on any address
+// that might not survive a game update.
+uintptr_t safe_read_ptr(uintptr_t addr);
 
 // Helper to read game memory safely. Rejects both null and obviously-
 // bogus pointers (too-low static / zero-page addresses, and too-high
