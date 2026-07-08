@@ -1111,6 +1111,19 @@ inline bool is_valid_ptr(uintptr_t addr) {
            addr <= kMaximumUserPointerAddress;
 }
 
+// Whether [addr, addr+size) is currently committed and readable — i.e. it can
+// be dereferenced without faulting. Stronger than is_valid_ptr, which only
+// range-checks the numeric value: a hardcoded RVA or a reverse-engineered
+// pointer-chain offset can be well inside the canonical user-address range yet
+// point past the (patched, relaid-out, or smaller) module image or into a
+// freed allocation, where a bare read triggers an access violation and takes
+// the whole game down. Backed by VirtualQuery, so it reflects the live page
+// state. Use it before dereferencing any address a game patch could have
+// invalidated. Read-only; never mutates memory. Defined in game_structures.cpp
+// because it needs <Windows.h>, which we keep out of this widely-included
+// header.
+bool is_readable(uintptr_t addr, size_t size);
+
 // Helper to read game memory safely. Rejects both null and obviously-
 // bogus pointers (too-low static / zero-page addresses, and too-high
 // sign-extended / kernel addresses) — the latter is the real win over

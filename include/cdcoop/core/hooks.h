@@ -24,6 +24,13 @@ struct HookStatus {
     int failed = 0;
     std::vector<std::string> failed_names;
     std::vector<std::string> installed_names;
+
+    // Set when neither the WorldSystem singleton nor the player actor could be
+    // resolved — the tell-tale of a game patch that moved every offset. When
+    // true, the mod's signatures no longer match this build and co-op features
+    // are unavailable until they're updated. Surfaced in the overlay so users
+    // recognise a version mismatch rather than a broken install.
+    bool unsupported_build = false;
 };
 
 // Central hook manager - discovers and hooks game functions

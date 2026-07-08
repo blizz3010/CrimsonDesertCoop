@@ -110,6 +110,24 @@ bool HookManager::initialize() {
         resolve_player_base();
     }
 
+    // If neither the WorldSystem singleton nor the player actor resolved, every
+    // AOB in this build has drifted — almost always because a game patch changed
+    // the offsets (see issue #49: signatures all failing after an update). Flag
+    // the build as unsupported so a shared log / the overlay makes the version
+    // mismatch obvious. The per-hook installs below still run, but each is
+    // individually guarded and will simply report "failed" rather than writing
+    // to the wrong addresses.
+    {
+        const auto& rt = get_runtime_offsets();
+        if (!rt.world_system_resolved && !rt.player_resolved) {
+            status_.unsupported_build = true;
+            spdlog::error("Neither WorldSystem nor player resolved — this game "
+                          "build looks unsupported (offsets changed by a patch). "
+                          "Co-op features are unavailable until the signatures are "
+                          "updated. See docs/REVERSE_ENGINEERING.md and issue #49.");
+        }
+    }
+
     // --- ChildActor vtable resolution (from EquipHide, 3 fallback sigs) ---
     // Populates rt.child_actor_vtbl. Used by is_child_actor() to filter
     // child entities (companions, summons) from regular enemies during
@@ -412,7 +430,11 @@ bool HookManager::resolve_world_system() {
         uintptr_t rip_addr = result.address + rip_offset;
         rt.world_system_ptr = MemoryScanner::follow_rel32(rip_addr, 0);
 
-        if (is_valid_ptr(rt.world_system_ptr)) {
+        // is_readable, not just is_valid_ptr: if a patched build makes this
+        // signature match at the wrong place, the computed RIP target can point
+        // at unmapped memory, and the dereference below would fault. Fail closed
+        // instead of crashing.
+        if (is_readable(rt.world_system_ptr, sizeof(uintptr_t))) {
             // Dereference to get actual WorldSystem pointer
             uintptr_t ws = *reinterpret_cast<uintptr_t*>(rt.world_system_ptr);
             if (is_valid_ptr(ws)) {
@@ -495,7 +517,7 @@ bool HookManager::resolve_player_base() {
         uintptr_t rip_addr = result.address + signatures::PLAYER_BASE_DISCOVERY_RIP_OFFSET;
         uintptr_t player_base_storage = MemoryScanner::follow_rel32(rip_addr, 0);
 
-        if (is_valid_ptr(player_base_storage)) {
+        if (is_readable(player_base_storage, sizeof(uintptr_t))) {
             uintptr_t player_base = *reinterpret_cast<uintptr_t*>(player_base_storage);
             if (is_valid_ptr(player_base)) {
                 // Follow the chain to find the player actor:
@@ -520,27 +542,44 @@ bool HookManager::resolve_player_base() {
         }
     }
 
-    // Method 2: Hardcoded static base (last resort, v1.01.03)
-    uintptr_t static_base = game_base_ + offsets::PlayerBase::STATIC_RVA;
-    uintptr_t player_base = *reinterpret_cast<uintptr_t*>(static_base);
-    if (is_valid_ptr(player_base)) {
-        uintptr_t actor = resolve_ptr_chain(player_base, {
-            offsets::PlayerBase::CHAIN_0,
-            offsets::PlayerBase::CHAIN_1,
-            offsets::PlayerBase::CHAIN_2,
-            offsets::PlayerBase::SLOT_KLIFF
-        });
+    // Method 2: Hardcoded static base (last resort, v1.01.03).
+    // Unlike Method 1, this RVA is a blind guess against the old (March 2026)
+    // image layout — no signature backs it. After a game patch the address can
+    // fall outside the relaid-out (or smaller) module image, so we must confirm
+    // it is inside the module AND currently mapped before reading it. A bare
+    // dereference here is the crash reported when a patch moves every offset:
+    // the signatures fail, we fall through to this read, and it faults on
+    // unmapped memory. is_valid_ptr can't catch it (the address is numerically
+    // in range) — only a bounds + committed-memory check can.
+    const uintptr_t static_rva = offsets::PlayerBase::STATIC_RVA;
+    const uintptr_t static_base = game_base_ + static_rva;
+    if (static_rva + sizeof(uintptr_t) <= game_size_ &&
+        is_readable(static_base, sizeof(uintptr_t))) {
+        uintptr_t player_base = *reinterpret_cast<uintptr_t*>(static_base);
+        if (is_valid_ptr(player_base)) {
+            uintptr_t actor = resolve_ptr_chain(player_base, {
+                offsets::PlayerBase::CHAIN_0,
+                offsets::PlayerBase::CHAIN_1,
+                offsets::PlayerBase::CHAIN_2,
+                offsets::PlayerBase::SLOT_KLIFF
+            });
 
-        if (is_valid_ptr(actor)) {
-            rt.player_actor_ptr = actor;
-            rt.player_resolved = true;
-            // Also resolve stats component
-            uintptr_t sb = resolve_ptr_chain(actor, {offsets::Player::STAT_COMPONENT});
-            if (is_valid_ptr(sb)) rt.player_stats_component = sb;
-            spdlog::info("Player resolved via static base (0x{:X}) at 0x{:X}",
-                         offsets::PlayerBase::STATIC_RVA, actor);
-            return true;
+            if (is_valid_ptr(actor)) {
+                rt.player_actor_ptr = actor;
+                rt.player_resolved = true;
+                // Also resolve stats component
+                uintptr_t sb = resolve_ptr_chain(actor, {offsets::Player::STAT_COMPONENT});
+                if (is_valid_ptr(sb)) rt.player_stats_component = sb;
+                spdlog::info("Player resolved via static base (0x{:X}) at 0x{:X}",
+                             static_rva, actor);
+                return true;
+            }
         }
+    } else {
+        spdlog::warn("Static player base RVA 0x{:X} is outside the current module "
+                     "image (size 0x{:X}) or not mapped — game version likely "
+                     "changed; skipping hardcoded fallback to avoid a crash",
+                     static_rva, game_size_);
     }
 
     spdlog::warn("Failed to resolve player via PlayerBase methods");

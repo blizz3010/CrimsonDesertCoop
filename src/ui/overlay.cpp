@@ -220,6 +220,12 @@ void Overlay::render_debug_panel() {
     // --- Hook installation telemetry ---
     ImGui::Separator();
     const auto& hs = HookManager::instance().status();
+    if (hs.unsupported_build) {
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                           "Unsupported game version: signatures failed to match.");
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                           "Co-op is disabled until the mod is updated for this patch.");
+    }
     ImGui::Text("Hooks: %d installed, %d failed", hs.installed, hs.failed);
     if (!hs.failed_names.empty()) {
         if (ImGui::TreeNode("Failed hooks")) {

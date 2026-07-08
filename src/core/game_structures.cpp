@@ -10,10 +10,35 @@ RuntimeOffsets& get_runtime_offsets() {
     return offsets;
 }
 
+bool is_readable(uintptr_t addr, size_t size) {
+    if (!is_valid_ptr(addr) || size == 0) return false;
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(reinterpret_cast<const void*>(addr), &mbi, sizeof(mbi)) == 0) {
+        return false;
+    }
+    if (!(mbi.State & MEM_COMMIT)) return false;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+
+    // The whole [addr, addr+size) span must live inside this single committed
+    // region; a read that spills into the next (possibly unmapped) region
+    // would still fault.
+    const uintptr_t end = addr + size;
+    const uintptr_t region_end =
+        reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    return end >= addr && end <= region_end;
+}
+
 uintptr_t resolve_ptr_chain(uintptr_t base, std::initializer_list<uint32_t> offsets) {
     uintptr_t addr = base;
     for (auto offset : offsets) {
-        if (addr == 0) return 0;
+        // Fail closed if the slot we're about to read isn't backed by
+        // committed memory. After a game patch an offset can point past the
+        // end of the struct, or the struct may have been freed — a bare
+        // dereference here would fault and crash the game. is_valid_ptr alone
+        // can't catch that (the address is numerically in range); only a live
+        // page-state check can. See is_readable.
+        if (!is_readable(addr + offset, sizeof(uintptr_t))) return 0;
         auto next = *reinterpret_cast<uintptr_t*>(addr + offset);
         if (!is_valid_ptr(next)) return 0;
         addr = next;
